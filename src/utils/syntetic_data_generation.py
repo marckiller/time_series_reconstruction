@@ -164,3 +164,67 @@ def generate_synthetic_ohlc(
     instrument_df.insert(0, "timestamp", timestamps)
     
     return index_df, instrument_df
+
+def aggregate_ohlc(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """
+    Aggregate OHLC time series to a higher-level interval (e.g., from minute to hourly data).
+
+    Parameters:
+        df (pd.DataFrame): DataFrame containing OHLC data with a 'timestamp' column.
+        interval (str): Pandas offset string defining the aggregation interval (e.g., '1h', '15min', '1d').
+
+    Returns:
+        pd.DataFrame: Aggregated OHLC data with new timestamps as index.
+    """
+    df = df.copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df.set_index('timestamp', inplace=True)
+
+    agg = df.resample(interval).agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last'
+    }).dropna()
+
+    return agg.reset_index()
+
+def extract_time_series_per_interval(
+    high_df: pd.DataFrame,
+    low_df: pd.DataFrame,
+    price_column: str = "close",
+    include_first_open: bool = True
+) -> pd.DataFrame:
+    """
+    For each row in the higher-resolution OHLC DataFrame, extract a sequence of lower-resolution
+    price values (e.g., minute Close prices within an hour).
+
+    Parameters:
+        high_df (pd.DataFrame): Higher-level OHLC DataFrame (e.g., hourly).
+        low_df (pd.DataFrame): Lower-level OHLC DataFrame (e.g., minute).
+        price_column (str): Column name to extract from the lower-level DataFrame ('close', etc.).
+        include_first_open (bool): Whether to prepend the first 'open' value of the interval.
+
+    Returns:
+        pd.DataFrame: DataFrame with one row per high_df interval and a list of prices per row.
+    """
+    result = []
+    low_df = low_df.copy()
+    low_df['timestamp'] = pd.to_datetime(low_df['timestamp'])
+    low_df.set_index('timestamp', inplace=True)
+
+    for _, row in high_df.iterrows():
+        start_time = pd.to_datetime(row['timestamp'])
+        end_time = start_time + (high_df['timestamp'].diff().median() or pd.Timedelta("1h"))
+        interval_df = low_df.loc[(low_df.index >= start_time) & (low_df.index < end_time)]
+
+        series = interval_df[price_column].tolist()
+        if include_first_open and not interval_df.empty:
+            series = [interval_df['open'].iloc[0]] + series
+
+        result.append(series)
+
+    return pd.DataFrame({
+        "timestamp": high_df['timestamp'],
+        "series": result
+    })
