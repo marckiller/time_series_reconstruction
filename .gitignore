@@ -1,5 +1,5 @@
 data/real/
-data/syntetic/
+data/synthetic/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
