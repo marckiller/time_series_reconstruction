@@ -60,3 +60,19 @@ def build_dataset(
     tensors = [process_block(columns_map[k]) for k in all_keys]
 
     return tuple(tensors)
+
+from torch.utils.data import Dataset, DataLoader
+
+class TimeSeriesDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return self.data['X_seq'].shape[0]
+
+    def __getitem__(self, idx):
+        return {
+            'X_seq': self.data['X_seq'][idx],
+            'X_static': self.data['X_static'][idx],
+            'y_seq': self.data['y_seq'][idx],
+        }

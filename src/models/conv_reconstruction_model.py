@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class ConvPredictionModel(nn.Module):
+class ConvReconstructionModel(nn.Module):
     """
     A convolutional neural network model for time series prediction that combines multiple convolutional branches
     with a static feature processing branch. The model processes sequential time series data through convolutional
