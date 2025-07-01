@@ -1,3 +1,6 @@
+import torch
+import torch.nn as nn
+
 def apply_masked_mse(a: torch.Tensor, b: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """
     Computes the masked mean squared error between tensors a and b.
