@@ -1,6 +1,10 @@
 import pandas as pd
 import numpy as np
 
+import yaml
+with open("config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -11,10 +15,11 @@ import src.utils.preprocessing as pre
 master_df = None
 
 # Parameters for the synthetic data generation
-n_intervals = 60 * 60 * 100
+n_intervals = 60 * 60 * 100  # You can optionally add to config
 time_interval = "1min"
 start_time = "2025-01-01 00:00:00"
 return_type = "log"
+output_path = config["data"]["synthetic_dataset"]
 
 tick_values = [4, 8, 10]
 sigma_pairs = [
@@ -78,5 +83,5 @@ for ticks_per_interval in tick_values:
 
             print(f"     Rows: {len(fake_df)} added to master dataframe")
 
-master_df.to_parquet("data/synthetic/dataset.parquet", index=False)
-print(f"\nMaster dataframe with {len(master_df)} rows saved to 'data/synthetic/dataset.parquet'")
+master_df.to_parquet(output_path, index=False)
+print(f"\nMaster dataframe with {len(master_df)} rows saved to '{output_path}'")
