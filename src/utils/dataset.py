@@ -124,6 +124,15 @@ class MaskedTimeSeriesDataset(Dataset):
         mask = base_mask * random_keep
         x_masked = torch.nan_to_num(x, nan=0.0) * mask
         return x_masked, mask
+    
+    def set_mask_probabilities(self, mask_config: Dict[str, Union[float, int]]):
+        """
+        Set the masking probabilities for the dataset.
+
+        Parameters:
+            mask_config (dict): Dictionary with keys 'ts_keep_prob', 'index_keep_prob', and 'static_p'.
+        """
+        self.mask_config = mask_config
 
     def __getitem__(self, idx):
         xi = self.X_index[idx]
