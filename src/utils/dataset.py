@@ -61,18 +61,118 @@ def build_dataset(
 
     return tuple(tensors)
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
-class TimeSeriesDataset(Dataset):
-    def __init__(self, data):
-        self.data = data
+class MaskedTimeSeriesDataset(Dataset):
+    """
+    PyTorch Dataset for training models on masked time series data.
+
+    This dataset is intended to simulate missing or irregular data patterns 
+    by applying different masking strategies to three input modalities:
+    - X_index: time or position indices
+    - X_ts: temporal (time-varying) features
+    - X_static: static features
+
+    It also processes target sequences y and returns a mask for valid targets.
+
+    Parameters:
+        X_index (torch.Tensor): Tensor of shape (N, L1) with index-like values.
+        X_ts (torch.Tensor): Tensor of shape (N, L2) with time series features.
+        X_static (torch.Tensor): Tensor of shape (N, D) with static features.
+        y (torch.Tensor): Tensor of shape (N, L3) with target values.
+        mask_config (dict, optional): Dictionary to control masking behavior:
+            - 'ts_keep_prob' (float): Probability of keeping a value in X_ts during random masking.
+            - 'index_keep_prob' (float): Probability of keeping a value in X_index.
+            - 'static_p' (float): Probability of masking a static feature.
+
+    Each call to __getitem__ returns a dictionary:
+        {
+            'X_index': (L1,), masked indices,
+            'X_index_mask': (L1,), 1 if value was kept, 0 otherwise,
+            'X_ts': (L2,), masked time series input,
+            'X_ts_mask': (L2,), corresponding binary mask,
+            'X_static': (D,), masked static features,
+            'X_static_mask': (D,), corresponding binary mask,
+            'y': (L3,), target sequence with NaNs replaced by zero,
+            'y_mask': (L3,), 1 where original y was not NaN
+        }
+    """
+    def __init__(
+        self,
+        X_index: torch.Tensor,
+        X_ts: torch.Tensor,
+        X_static: torch.Tensor,
+        y: torch.Tensor,
+        mask_config: Dict[str, Union[float, int]] = None
+    ):
+        self.X_index = X_index
+        self.X_ts = X_ts
+        self.X_static = X_static
+        self.y = y
+        self.mask_config = mask_config or {}
 
     def __len__(self):
-        return self.data['X_seq'].shape[0]
+        return self.X_index.shape[0]
+
+    def interval_mask(self, length: int, every: int, start: int = 0) -> torch.Tensor:
+        mask = torch.zeros(length)
+        mask[start::every] = 1.0
+        return mask
+
+    def random_mask(self, x: torch.Tensor, base_mask: torch.Tensor, p: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        random_keep = (torch.rand_like(x) > p).float()
+        mask = base_mask * random_keep
+        x_masked = torch.nan_to_num(x, nan=0.0) * mask
+        return x_masked, mask
 
     def __getitem__(self, idx):
+        xi = self.X_index[idx]
+        xts = self.X_ts[idx]
+        xs = self.X_static[idx]
+        yt = self.y[idx]
+
+        L = xi.shape[0]
+
+        xi_base_mask = (~torch.isnan(xi)).float()
+        xts_base_mask = (~torch.isnan(xts)).float()
+        xs_base_mask = (~torch.isnan(xs)).float()
+        y_mask       = (~torch.isnan(yt)).float()
+
+        ts_mode = torch.randint(0, 4, (1,)).item()
+        if ts_mode == 0:
+            ts_mask = torch.zeros_like(xts)
+        elif ts_mode == 1:
+            keep_prob = self.mask_config.get('ts_keep_prob', torch.empty(1).uniform_(0.0, 0.2).item())
+            ts_mask = (torch.rand_like(xts) < keep_prob).float()
+        elif ts_mode == 2:
+            ts_mask = self.interval_mask(L, every=2, start=torch.randint(0, 2, (1,)).item())
+        else:
+            every = 5 if torch.rand(1).item() < 0.5 else 10
+            ts_mask = self.interval_mask(L, every=every, start=torch.randint(0, every, (1,)).item())
+        ts_mask = xts_base_mask * ts_mask
+        xts_masked = torch.nan_to_num(xts, nan=0.0) * ts_mask
+
+        idx_mode = torch.randint(0, 2, (1,)).item()
+        if idx_mode == 0:
+            idx_mask = xi_base_mask
+        else:
+            keep_prob = self.mask_config.get('index_keep_prob', torch.empty(1).uniform_(0.4, 0.8).item())
+            random_keep = (torch.rand_like(xi) < keep_prob).float()
+            idx_mask = xi_base_mask * random_keep
+        xi_masked = torch.nan_to_num(xi, nan=0.0) * idx_mask
+
+        p_static = self.mask_config.get('static_p', torch.empty(1).uniform_(0.1, 0.5).item())
+        xs_masked, xs_mask = self.random_mask(xs, xs_base_mask, p_static)
+
+        yt_filled = torch.nan_to_num(yt, nan=0.0)
+
         return {
-            'X_seq': self.data['X_seq'][idx],
-            'X_static': self.data['X_static'][idx],
-            'y_seq': self.data['y_seq'][idx],
+            'X_index': xi_masked,
+            'X_index_mask': idx_mask,
+            'X_ts': xts_masked,
+            'X_ts_mask': ts_mask,
+            'X_static': xs_masked,
+            'X_static_mask': xs_mask,
+            'y': yt_filled,
+            'y_mask': y_mask
         }

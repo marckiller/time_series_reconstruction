@@ -1,72 +1,65 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class ConvReconstructionModel(nn.Module):
     """
-    A convolutional neural network model for time series prediction that combines multiple convolutional branches
-    with a static feature processing branch. The model processes sequential time series data through convolutional
-    layers with different kernel sizes, and static features through fully connected layers, then concatenates
-    the outputs to produce a final prediction.
+    A convolutional neural network model for masked time series reconstruction.
 
-    Architecture:
-    - Three convolutional branches with kernel sizes 2, 5, and 9, each consisting of two Conv1d + ReLU layers followed by flattening.
-    - A static feature branch with two fully connected layers with ReLU activations.
-    - A final fully connected output layer that combines features from all branches to predict the output sequence.
+    Args:
+        seq_len (int): Length of the time series sequences.
+        static_dim (int): Dimension of the static input features.
+        conv_channels (int): Number of output channels for each convolutional filter.
+
+    Forward Inputs:
+        X_index (Tensor): Index time series input of shape (B, L).
+        X_index_mask (Tensor): Binary mask for X_index of shape (B, L).
+        X_ts (Tensor): Ground truth time series input of shape (B, L).
+        X_ts_mask (Tensor): Binary mask for X_ts indicating observed values (B, L).
+        X_static (Tensor): Static input features of shape (B, static_dim).
+        X_static_mask (Tensor): Binary mask for static features (B, static_dim).
+
+    Returns:
+        Tensor of shape (B, L): Reconstructed time series.
     """
-
-    def __init__(self, seq_len: int = 60, static_dim: int = 10, output_dim: int = 60):
+    def __init__(self, seq_len=60, static_dim=10, conv_channels=32):
         super().__init__()
         self.seq_len = seq_len
         self.static_dim = static_dim
-        self.output_dim = output_dim
 
-        self.conv_branches = nn.ModuleList([
-            nn.Sequential(
-                nn.Conv1d(1, 8, kernel_size=k, padding=k // 2),
-                nn.ReLU(),
-                nn.Conv1d(8, 8, kernel_size=k, padding=k // 2),
-                nn.ReLU(),
-                nn.Flatten()
-            )
-            for k in [2, 5, 9]
+        # --- CNN for X_index ---
+        self.convs = nn.ModuleList([
+            nn.Conv1d(1, conv_channels, kernel_size=k, padding='same')
+            for k in [2, 5, 10, 20]
         ])
+        self.index_proj = nn.Linear(128 * seq_len, seq_len)
 
-        self.static_branch = nn.Sequential(
-            nn.Linear(static_dim, 32),
+        # --- Dense for X_static ---
+        self.static_net = nn.Sequential(
+            nn.Linear(static_dim, 64),
             nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU()
+            nn.Linear(64, seq_len)
         )
 
-        # Dummy forward to calculate output shape
-        with torch.no_grad():
-            dummy_ts = torch.zeros(1, 1, seq_len)
-            conv_outs = [branch(dummy_ts) for branch in self.conv_branches]
-            conv_dim = sum([out.shape[1] for out in conv_outs])
-            dummy_static = torch.zeros(1, static_dim)
-            static_dim_out = self.static_branch(dummy_static).shape[1]
-            total_input_dim = conv_dim + static_dim_out
+    def forward(self, X_index, X_index_mask, X_ts, X_ts_mask, X_static, X_static_mask):
+        B, L = X_index.shape
 
-        self.output_layer = nn.Sequential(
-            nn.Linear(total_input_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, output_dim)
-        )
+        # --- CNN branch ---
+        x_idx = X_index * X_index_mask  # masking
+        x_idx = x_idx.unsqueeze(1)  # (B, 1, L)
+        conv_outs = [F.relu(conv(x_idx)) for conv in self.convs]  # (B, C, L)
+        x_cnn = torch.cat(conv_outs, dim=1)  # (B, C_total, L)
+        x_cnn = x_cnn.view(B, -1)  # (B, C_total * L)
+        x_cnn = self.index_proj(x_cnn)  # (B, L)
 
-    def forward(self, x_seq: torch.Tensor, x_static: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the model.
+        # --- Static branch ---
+        x_static_masked = X_static * X_static_mask  # masking
+        x_static_out = self.static_net(x_static_masked)  # (B, L)
 
-        Args:
-            x_seq (torch.Tensor): Time series input tensor of shape (batch_size, seq_len).
-            x_static (torch.Tensor): Static features tensor of shape (batch_size, static_dim).
+        # --- Combine model components ---
+        pred = x_cnn + x_static_out
 
-        Returns:
-            torch.Tensor: Output predictions of shape (batch_size, output_dim).
-        """
-        x_seq = x_seq.unsqueeze(1)  # (B, 1, seq_len)
-        conv_outs = [branch(x_seq) for branch in self.conv_branches]
-        x_conv = torch.cat(conv_outs, dim=1)
-        x_static_out = self.static_branch(x_static)
-        x_all = torch.cat([x_conv, x_static_out], dim=1)
-        return self.output_layer(x_all)
+        # --- Incorporate X_ts as ground truth where available ---
+        pred = pred * (1 - X_ts_mask) + X_ts * X_ts_mask
+
+        return pred
