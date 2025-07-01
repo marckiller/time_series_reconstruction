@@ -1,3 +1,6 @@
+import yaml
+with open("config.yaml", "r") as f:
+    config = yaml.safe_load(f)
 import pandas as pd
 
 import sys
@@ -6,12 +9,12 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 #Loading data file
 
-real_dataset = "data/real/dataset.parquet"
+real_dataset = config["data"]["real_dataset"]
 df = pd.read_parquet(real_dataset)
 df.dropna(inplace=True)
 
 #sample just 1000 elements
-df = df.sample(n=1000, random_state=42)
+df = df.sample(n=config["data"]["n_samples"], random_state=config["general"]["seed"])
 
 print(f"Dropped NaN values, now {len(df)} rows")
 
@@ -86,32 +89,24 @@ model = ConvReconstructionModel(
     static_dim=dataset_train[0]['X_static'].shape[-1]
 ).to(device)
 
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
+optimizer = optim.Adam(model.parameters(), lr=config["training"]["learning_rate"])
 
 # Trening
 import os
 
 best_val_loss = float('inf')
-patience = 3
+patience = config["training"]["early_stopping_patience"]
 wait = 0
 
-model_path = 'best_model.pt'
+model_path = config["training"]["model_save_path"]
 
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode='min', factor=0.5, patience=2, threshold=1e-4, verbose=True
 )
 
-loss_weights = {
-    'mse': 1.0,
-    'min_val': 0.8,
-    'max_val': 0.8,
-    'min_pos': 0.6,
-    'max_pos': 0.6,
-    'roughness': 0.1,
-    'pull': 0.3
-}
+loss_weights = config["loss"]["weights"]
 
-for epoch in range(50):
+for epoch in range(config["training"]["epochs"]):
 
     model.train()
     train_vals = torch.zeros(8).to(device)

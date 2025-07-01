@@ -1,0 +1,33 @@
+general:
+  seed: 42
+
+data:
+  synthetic_dataset: "data/synthetic/dataset.parquet"
+  real_dataset: "data/real/dataset.parquet"
+  raw_data_path: "data/real/raw"
+  index: "WIG20"
+  n_samples: 500
+
+model:
+  name: "ConvReconstructionModel"
+
+training:
+  epochs: 50
+  learning_rate: 0.001
+  optimizer: "adam"
+  scheduler: "none"
+  early_stopping_patience: 5
+  save_best_model: true
+  model_save_path: "models/conv_reconstruction_model.pt"
+
+loss:
+  type: "composite"
+  weights:
+    mse: 1.0
+    min_val: 0.3
+    max_val: 0.3
+    min_pos: 0.2
+    max_pos: 0.2
+    roughness: 0.1
+    pull: 0.1
+  adaptive_weighting: false

@@ -9,8 +9,12 @@ import src.utils.preprocessing as pre
 
 import os
 
-folder_path = "data/real/raw"
-index_name = "WIG20"
+import yaml
+with open("config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+index_name = config["data"]["index"]
+folder_path = config["data"]["raw_data_path"]
 
 prn_files = [
     f[:-4] for f in os.listdir(folder_path)
@@ -63,8 +67,9 @@ for name in prn_files:
 
     print(f"Master dataframe with {len(master_df)} rows created.")
 
-master_df.to_parquet("data/real/dataset.parquet", index=False)
-print(f"\nMaster dataframe with {len(master_df)} rows saved to 'data/real/dataset.parquet'")
+output_path = config["data"]["real_dataset"]
+master_df.to_parquet(output_path, index=False)
+print(f"\nMaster dataframe with {len(master_df)} rows saved to '{output_path}'")
 
     
 
