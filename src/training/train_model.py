@@ -57,6 +57,14 @@ def train_model(df, config):
         static_dim=dataset_train[0]['X_static'].shape[-1]
     ).to(device)
 
+    if config["training"].get("mode") == "finetune":
+        path = config["training"].get("pretrained_model_path")
+        if path and os.path.exists(path):
+            model.load_state_dict(torch.load(path, map_location=device))
+            print(f"Loaded pretrained model from {path}")
+        else:
+            raise ValueError("Pretrained model path is missing or invalid.")
+
     optimizer = optim.Adam(model.parameters(), lr=config["training"]["learning_rate"])
     
     scheduler_type = config["training"].get("scheduler", "none")
