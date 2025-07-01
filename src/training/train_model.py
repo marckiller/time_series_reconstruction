@@ -30,17 +30,21 @@ def train_model(df, config):
     def split_tensor(tensor, indices):
         return tensor[indices]
 
+    mask_cfg = config["data"].get("mask_config", {})
+
     dataset_train = MaskedTimeSeriesDataset(
         split_tensor(X_index, train_idx),
         split_tensor(X_ts, train_idx),
         split_tensor(X_static, train_idx),
-        split_tensor(y, train_idx)
+        split_tensor(y, train_idx),
+        mask_config=mask_cfg
     )
     dataset_val = MaskedTimeSeriesDataset(
         split_tensor(X_index, val_idx),
         split_tensor(X_ts, val_idx),
         split_tensor(X_static, val_idx),
-        split_tensor(y, val_idx)
+        split_tensor(y, val_idx),
+        mask_config=mask_cfg
     )
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -54,7 +58,17 @@ def train_model(df, config):
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=config["training"]["learning_rate"])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, threshold=1e-4, verbose=True)
+    
+    scheduler_type = config["training"].get("scheduler", "none")
+
+    if scheduler_type == "reduce_on_plateau":
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=2, threshold=1e-4, verbose=True
+        )
+    elif scheduler_type == "none":
+        scheduler = None
+    else:
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
 
     model_path = config["training"]["model_save_path"]
     patience = config["training"]["early_stopping_patience"]
@@ -113,7 +127,8 @@ def train_model(df, config):
         print(f"  Train -> Total: {train_vals[0]:.4f}, MSE: {train_vals[1]:.4f}, MinV: {train_vals[2]:.4f}, MaxV: {train_vals[3]:.4f}, MinP: {train_vals[4]:.4f}, MaxP: {train_vals[5]:.4f}, Rough: {train_vals[6]:.4f}, Pull: {train_vals[7]:.4f}")
         print(f"  Val   -> Total: {val_vals[0]:.4f}, MSE: {val_vals[1]:.4f}, MinV: {val_vals[2]:.4f}, MaxV: {val_vals[3]:.4f}, MinP: {val_vals[4]:.4f}, MaxP: {val_vals[5]:.4f}, Rough: {val_vals[6]:.4f}, Pull: {val_vals[7]:.4f}")
 
-        scheduler.step(val_vals[0].item())
+        if scheduler:
+            scheduler.step(val_vals[0].item())
 
         if epoch >= 10 and val_vals[0] < best_val_loss - 1e-4:
             best_val_loss = val_vals[0]

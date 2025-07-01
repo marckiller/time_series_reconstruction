@@ -8,6 +8,11 @@ data:
   index: "WIG20"
   n_samples: 500
 
+  mask_config:
+    ts_keep_prob: 0.2       #strong masking X_ts
+    index_keep_prob: 0.5     #medium masking X_index
+    static_p: 0.3          # weak masking X_static
+
 model:
   name: "ConvReconstructionModel"
 
@@ -15,7 +20,7 @@ training:
   epochs: 50
   learning_rate: 0.001
   optimizer: "adam"
-  scheduler: "none"
+  scheduler: "reduce_on_plateau"
   early_stopping_patience: 5
   save_best_model: true
   model_save_path: "models/conv_reconstruction_model.pt"
