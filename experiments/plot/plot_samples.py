@@ -2,13 +2,14 @@ import torch
 import matplotlib.pyplot as plt
 import random
 import numpy as np
+import os
 
-def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3):
+def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3, output_path=None):
     model.eval()
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 3))
 
-    for ax in axes.flat:
-        idx = random.randint(0, len(dataset) - 1)
+    indices = random.sample(range(len(dataset)), n)
+    for ax, idx in zip(axes.flat, indices):
         sample = dataset[idx]
 
         with torch.no_grad():
@@ -45,6 +46,9 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3):
             ax.legend()
 
     plt.tight_layout()
+    if output_path:
+        os.makedirs(output_path, exist_ok=True)
+        plt.savefig(os.path.join(output_path, "sample_plots.png"))
     plt.show()
 
 
@@ -71,7 +75,8 @@ if __name__ == "__main__":
         end = pd.to_datetime(config["date_range"]["end"])
         df = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
 
-    df.dropna(inplace=True)
+    #df.dropna(inplace=True)
+    print("Total rows before sampling:", len(df))
     df = df.sample(n=config["n_samples"], random_state=42)
     print(len(df), "samples loaded from dataset")
 
@@ -110,5 +115,6 @@ if __name__ == "__main__":
         model, dataset, device,
         n=config["n_samples"],
         rows=plot_config.get("rows", 2),
-        cols=plot_config.get("cols", 3)
+        cols=plot_config.get("cols", 3),
+        output_path=config.get("output_path")
     )
