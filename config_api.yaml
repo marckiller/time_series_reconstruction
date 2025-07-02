@@ -1,0 +1,20 @@
+api:
+  model:
+    module: src.models.masked_reconstruction_model
+    class_name: MaskedReconstructionModel
+    model_path: models/model.pt
+
+  input:
+    index_series_name: index_ts_low_high_norm
+    ts_series_name: ts_low_high_norm
+    static_features:
+      - corr_30
+      - corr_60
+      - open_pos
+      - close_pos
+      - body_to_range
+      - direction
+      - index_open_pos
+      - index_close_pos
+      - index_body_to_range
+      - index_direction
