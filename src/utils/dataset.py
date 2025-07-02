@@ -8,7 +8,8 @@ def build_dataset(
     inputs: List[str],
     outputs: List[str],
     columns_map: Dict[str, List[str]],
-    expand_sequence_columns: bool = True
+    expand_sequence_columns: bool = True,
+    allow_nan: bool = True
 ) -> Tuple[torch.Tensor, ...]:
     """
     Builds model-ready tensors from a DataFrame.
@@ -36,7 +37,7 @@ def build_dataset(
 
             series = df[col]
 
-            if series.isnull().any():
+            if series.isnull().any() and not allow_nan:
                 raise ValueError(f"Column '{col}' contains NaN values.")
 
             if expand_sequence_columns:
@@ -153,13 +154,15 @@ class MaskedTimeSeriesDataset(Dataset):
         ts_mask = xts_base_mask * ts_mask
         xts_masked = torch.nan_to_num(xts, nan=0.0) * ts_mask
 
-        keep_prob = self.mask_config.get('index_keep_prob', 0.5)
+        keep_prob = self.mask_config.get('index_keep_prob', 1.0)
         random_keep = (torch.rand_like(xi) < keep_prob).float()
         idx_mask = xi_base_mask * random_keep
         xi_masked = torch.nan_to_num(xi, nan=0.0) * idx_mask
 
-        p_static = self.mask_config.get('static_p', torch.empty(1).uniform_(0.1, 0.5).item())
-        xs_masked, xs_mask = self.random_mask(xs, xs_base_mask, p_static)
+        static_keep_prob = self.mask_config.get('static_keep_prob', 1.0)
+        random_keep = (torch.rand_like(xs) < static_keep_prob).float()
+        xs_mask = xs_base_mask * random_keep
+        xs_masked = torch.nan_to_num(xs, nan=0.0) * xs_mask
 
         yt_filled = torch.nan_to_num(yt, nan=0.0)
 
@@ -171,5 +174,7 @@ class MaskedTimeSeriesDataset(Dataset):
             'X_static': xs_masked,
             'X_static_mask': xs_mask,
             'y': yt_filled,
-            'y_mask': y_mask
+            'y_mask': y_mask,
+            'X_index_raw': xi,
+            'X_ts_raw': xts
         }

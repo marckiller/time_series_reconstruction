@@ -137,14 +137,14 @@ for ts_keep_prob in config["ts_keep_probs"]:
         results[(ts_keep_prob, index_keep_prob)] = compute_metrics(all_targets, all_preds, config["metrics"])
 
 # Save results
-
 os.makedirs(os.path.dirname(config["output_path"]), exist_ok=True)
+os.makedirs(config["output_plot_path"], exist_ok=True)
 with open(config["output_path"], "w") as f:
     yaml.dump(results, f)
 
 # Save clean JSON
 import json
-json_path = config["output_path"].replace(".yaml", ".json").replace(".yml", ".json")
+json_path = config["output_json_path"]
 cleaned = {
     f"{ts}_{idx}": {k: float(v) for k, v in met.items()}
     for (ts, idx), met in results.items()
@@ -169,11 +169,11 @@ for metric in metrics_list:
 
     plt.figure(figsize=(8, 6))
     sns.heatmap(heatmap_data, xticklabels=ts_values, yticklabels=index_values, annot=True, fmt=".4g")
-    plt.xlabel("ts_keep_prob")
-    plt.ylabel("index_keep_prob")
+    plt.xlabel("Instrument sequence: % visible")
+    plt.ylabel("Index sequence: % visible")
     plt.title(f"{metric.upper()} (static_p = {static_p_val}) - {model_cfg['class_name']}")
     plt.tight_layout()
 
-    out_path = os.path.splitext(config["output_path"])[0] + f"_{metric}.png"
+    out_path = os.path.join(config.get("output_plot_path", "results/plots"), f"{metric}.png")
     plt.savefig(out_path)
     plt.close()
