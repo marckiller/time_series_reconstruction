@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
+url = "http://127.0.0.1:8000/predict"
+
 def test_api_predict_incremental_masking(n_plots=60):
     with open("config/config_experiment.yaml", "r") as f:
         config = yaml.safe_load(f)["plot_samples"]
@@ -34,8 +36,6 @@ def test_api_predict_incremental_masking(n_plots=60):
         "index_body_to_range": row["index_body_to_range"],
         "index_direction": row["index_direction"]
     }
-
-    url = "http://127.0.0.1:8000/predict"
 
     np.random.seed(42)
     mask_order = np.random.permutation(ts_length)

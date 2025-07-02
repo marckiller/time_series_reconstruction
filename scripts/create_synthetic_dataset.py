@@ -32,7 +32,6 @@ for ticks_per_interval in tick_values:
             case_id += 1
             print(f"[{case_id}/{total_cases}] ticks: {ticks_per_interval}, sigma_index: {sigma_index}, sigma_instr: {sigma_instr}, corr: {corr}")
 
-
             synthetic_index, synthetic_instrument = sdg.generate_synthetic_ohlc(
                 n_intervals=n_intervals,
                 ticks_per_interval=ticks_per_interval,
@@ -75,6 +74,9 @@ for ticks_per_interval in tick_values:
             master_df = pre.append_to_master_dataframe(master_df, fake_df)
 
             print(f"     Rows: {len(fake_df)} added to master dataframe")
+
+output_dir = os.path.dirname(output_path)
+os.makedirs(output_dir, exist_ok=True)
 
 master_df.to_parquet(output_path, index=False)
 print(f"\nMaster dataframe with {len(master_df)} rows saved to '{output_path}'")

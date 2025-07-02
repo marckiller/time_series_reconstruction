@@ -1,0 +1,5 @@
+pandas
+pyyaml
+torch
+fastapi
+uvicorn

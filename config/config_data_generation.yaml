@@ -1,14 +1,12 @@
 generation:
-  n_intervals: 216000  # 60 * 60 * 100
+  n_intervals: 60000  # 60 * 60 * 100
   time_interval: "1min"
   start_time: "2025-01-01 00:00:00"
   return_type: "log"
-  output_path: "data/synthetic/dataset.parquet"
+  output_path: "data/sample/dataset.parquet"
 
 simulation:
-  tick_values: [4, 8, 10]
+  tick_values: [8]
   sigma_pairs:
-    - [0.00002, 0.00004]
     - [0.00004, 0.00008]
-    - [0.00006, 0.00012]
-  correlations: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+  correlations: [0.2, 0.5, 0.8]
