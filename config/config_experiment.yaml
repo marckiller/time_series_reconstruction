@@ -1,5 +1,5 @@
 compute_metrics:
-  input_path: data/synthetic/dataset.parquet
+  input_path: data/sample/dataset.parquet
   output_path: results/metrics_report.json
   output_json_path: results/metrics_report.json
   ts_keep_probs: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -25,7 +25,7 @@ compute_metrics:
   output_plot_path: results/evaluation
 
 plot_samples:
-  input_path: data/synthetic/dataset.parquet
+  input_path: data/sample/dataset.parquet
   n_samples: 9
   model_path: models/model.pt
   model:
