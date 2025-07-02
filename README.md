@@ -1,5 +1,7 @@
 # time_series_reconstruction
 
+This project deals with stock market time series and focuses on reconstructing and completing company stock price trajectories based on index data using neural networks. The goal is to accurately fill in missing or noisy parts of a company’s price series by leveraging information from the broader market index, improving analysis and prediction in financial applications.
+
 ## Environment Setup
 
 You can set up the required environment in two ways:
@@ -61,26 +63,42 @@ uvicorn app:app --reload --port 8001
 
 ## Example API Usage
 
-To use the `predict` endpoint, send a POST request with a JSON body containing the input time series data. For example:
+To use the `predict` endpoint, send a POST request with a JSON body containing the input time series data. JSON contains:
 
-```json
-{
-  "index_ts_low_high_norm": [/* array of 60 floats or nulls */],
-  "corr_30": /* float */,
-  "corr_60": /* float */,
-  "open_pos": /* float */,
-  "close_pos": /* float */,
-  "body_to_range": /* float */,
-  "direction": /* float or int */,
-  "index_open_pos": /* float */,
-  "index_close_pos": /* float */,
-  "index_body_to_range": /* float */,
-  "index_direction": /* float or int */,
-  "ts_low_high_norm": [/* array of 60 floats or nulls */]
-}
-```
+- `index_ts_low_high_norm`: array of 60 floats or nulls
+- `corr_30`: float or null
+- `corr_60`: float or null
+- `open_pos`: float or null
+- `close_pos`: float or null
+- `body_to_range`: float or null
+- `direction`: float or int or null
+- `index_open_pos`: float or null
+- `index_close_pos`: float or null
+- `index_body_to_range`: float or null
+- `index_direction`: float or int or null
+- `ts_low_high_norm`: array of 60 floats or nulls
 
 This request sends a time series array and optional parameters to the API, which returns the reconstructed or predicted time series data. A detailed example JSON payload is available in the `example.json` file.
+
+You can also test the API interactively in your browser using FastAPI's automatic documentation at the `/docs` endpoint.
+
+1. Run the API server locally, e.g.:
+```bash
+uvicorn app:app --reload --port 8000
+```
+2. Open your web browser and go to:
+```bash
+http://127.0.0.1:8000/docs
+```
+3. Find the `POST /predict` endpoint in the list and click on it to expand the details.
+
+4. Click the `Try it out` button.
+
+5. In the JSON input box that appears, paste your JSON payload (example available in `example.json` file)
+
+6. Click `Execute`.
+
+You will see the response from the API below, showing the prediction output.
 
 ## Running Experiments
 
