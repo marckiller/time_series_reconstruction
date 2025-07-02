@@ -171,7 +171,7 @@ for metric in metrics_list:
     sns.heatmap(heatmap_data, xticklabels=ts_values, yticklabels=index_values, annot=True, fmt=".4g")
     plt.xlabel("ts_keep_prob")
     plt.ylabel("index_keep_prob")
-    plt.title(f"{metric.upper()} (static_p = {static_p_val})")
+    plt.title(f"{metric.upper()} (static_p = {static_p_val}) - {model_cfg['class_name']}")
     plt.tight_layout()
 
     out_path = os.path.splitext(config["output_path"])[0] + f"_{metric}.png"
