@@ -124,6 +124,15 @@ class MaskedTimeSeriesDataset(Dataset):
         mask = base_mask * random_keep
         x_masked = torch.nan_to_num(x, nan=0.0) * mask
         return x_masked, mask
+    
+    def set_mask_probabilities(self, mask_config: Dict[str, Union[float, int]]):
+        """
+        Set the masking probabilities for the dataset.
+
+        Parameters:
+            mask_config (dict): Dictionary with keys 'ts_keep_prob', 'index_keep_prob', and 'static_p'.
+        """
+        self.mask_config = mask_config
 
     def __getitem__(self, idx):
         xi = self.X_index[idx]
@@ -138,27 +147,15 @@ class MaskedTimeSeriesDataset(Dataset):
         xs_base_mask = (~torch.isnan(xs)).float()
         y_mask       = (~torch.isnan(yt)).float()
 
-        ts_mode = torch.randint(0, 4, (1,)).item()
-        if ts_mode == 0:
-            ts_mask = torch.zeros_like(xts)
-        elif ts_mode == 1:
-            keep_prob = self.mask_config.get('ts_keep_prob', torch.empty(1).uniform_(0.0, 0.2).item())
-            ts_mask = (torch.rand_like(xts) < keep_prob).float()
-        elif ts_mode == 2:
-            ts_mask = self.interval_mask(L, every=2, start=torch.randint(0, 2, (1,)).item())
-        else:
-            every = 5 if torch.rand(1).item() < 0.5 else 10
-            ts_mask = self.interval_mask(L, every=every, start=torch.randint(0, every, (1,)).item())
+        keep_prob = self.mask_config.get('ts_keep_prob', 0.2)
+        ts_mask = (torch.rand_like(xts) < keep_prob).float()
+            
         ts_mask = xts_base_mask * ts_mask
         xts_masked = torch.nan_to_num(xts, nan=0.0) * ts_mask
 
-        idx_mode = torch.randint(0, 2, (1,)).item()
-        if idx_mode == 0:
-            idx_mask = xi_base_mask
-        else:
-            keep_prob = self.mask_config.get('index_keep_prob', torch.empty(1).uniform_(0.4, 0.8).item())
-            random_keep = (torch.rand_like(xi) < keep_prob).float()
-            idx_mask = xi_base_mask * random_keep
+        keep_prob = self.mask_config.get('index_keep_prob', 0.5)
+        random_keep = (torch.rand_like(xi) < keep_prob).float()
+        idx_mask = xi_base_mask * random_keep
         xi_masked = torch.nan_to_num(xi, nan=0.0) * idx_mask
 
         p_static = self.mask_config.get('static_p', torch.empty(1).uniform_(0.1, 0.5).item())

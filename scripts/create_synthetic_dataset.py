@@ -1,13 +1,10 @@
-import pandas as pd
-import numpy as np
-
-import yaml
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import yaml
+with open("config_data_generation.yaml", "r") as f:
+    config = yaml.safe_load(f)
 
 import src.utils.syntetic_data_generation as sdg
 import src.utils.preprocessing as pre
@@ -15,19 +12,15 @@ import src.utils.preprocessing as pre
 master_df = None
 
 # Parameters for the synthetic data generation
-n_intervals = 60 * 60 * 100  # You can optionally add to config
-time_interval = "1min"
-start_time = "2025-01-01 00:00:00"
-return_type = "log"
-output_path = config["data"]["synthetic_dataset"]
+n_intervals = config["generation"]["n_intervals"]
+time_interval = config["generation"]["time_interval"]
+start_time = config["generation"]["start_time"]
+return_type = config["generation"]["return_type"]
+output_path = config["generation"]["output_path"]
 
-tick_values = [4, 8, 10]
-sigma_pairs = [
-    (0.00002, 0.00004),
-    (0.00004, 0.00008),
-    (0.00006, 0.00012),
-]
-correlations = [round(c, 2) for c in list(np.arange(0.1, 1.0, 0.1))] + [0.95]
+tick_values = config["simulation"]["tick_values"]
+sigma_pairs = [tuple(pair) for pair in config["simulation"]["sigma_pairs"]]
+correlations = config["simulation"]["correlations"]
 
 total_cases = len(tick_values) * len(sigma_pairs) * len(correlations)
 case_id = 0
