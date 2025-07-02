@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import yaml
-with open("config_data_generation.yaml", "r") as f:
+with open("config/config_data_generation.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 import src.utils.syntetic_data_generation as sdg

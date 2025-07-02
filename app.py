@@ -8,7 +8,7 @@ from src.predictor import JSONPredictor
 
 app = FastAPI()
 
-with open("config_api.yaml", "r") as f:
+with open("config/config_api.yaml", "r") as f:
     config = yaml.safe_load(f)["api"]
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

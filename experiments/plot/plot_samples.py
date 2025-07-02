@@ -24,7 +24,6 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3, output_path
             y_pred     = model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
             y_pred     = y_pred.squeeze().cpu().numpy()
 
-        # Plot all y_true as faint dots
         y_true_squeezed = y_true.squeeze()
         ts_mask = sample['X_ts_mask'].squeeze().numpy()
         ts_visible = ts_mask[:, 0] == 1 if ts_mask.ndim == 2 else ts_mask == 1
@@ -32,10 +31,8 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3, output_path
         ax.plot(y_true_squeezed, 'bo', alpha=0.2, label='y (masked)')
         ax.plot(np.where(ts_visible)[0], y_true_squeezed[ts_visible], 'bo', label='y (visible by model)')
 
-        # Prediction
         ax.plot(y_pred, color='orange', linestyle='--', label='Pred')
 
-        # X_index visualization
         index_data = sample['X_index_raw'].squeeze().numpy()
         index_mask = sample['X_index_mask'].squeeze().numpy()
         ax.scatter(np.arange(len(index_data)), index_data, color='gray', alpha=0.2, s=10, label='Index (masked)')
@@ -51,8 +48,6 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3, output_path
         plt.savefig(os.path.join(output_path, "sample_plots.png"))
     plt.show()
 
-
-# Allow running as a script
 if __name__ == "__main__":
     import yaml
     import pandas as pd
@@ -64,7 +59,7 @@ if __name__ == "__main__":
     from src.utils.dataset import build_dataset, MaskedTimeSeriesDataset
     import importlib
 
-    with open("config_experiment.yaml", "r") as f:
+    with open("config/config_experiment.yaml", "r") as f:
         config = yaml.safe_load(f)["plot_samples"]
 
     df = pd.read_parquet(config["input_path"])
@@ -75,7 +70,7 @@ if __name__ == "__main__":
         end = pd.to_datetime(config["date_range"]["end"])
         df = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
 
-    #df.dropna(inplace=True)
+    #df.dropna(inplace=True) #allow for static features to be NaN
     print("Total rows before sampling:", len(df))
     df = df.sample(n=config["n_samples"], random_state=42)
     print(len(df), "samples loaded from dataset")

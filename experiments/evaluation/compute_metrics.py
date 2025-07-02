@@ -10,34 +10,26 @@ import pandas as pd
 import numpy as np
 import yaml
 
-# Load config
-with open("config_experiment.yaml", "r") as f:
+with open("config/config_experiment.yaml", "r") as f:
     config = yaml.safe_load(f)["compute_metrics"]
 
-# Load dataset
 df = pd.read_parquet(config["input_path"])
 df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-# Filter by date
 if config["date_range"].get("use_date_range", True):
     start, end = pd.to_datetime(config["date_range"]["start"]), pd.to_datetime(config["date_range"]["end"])
     df = df[(df["timestamp"] >= start) & (df["timestamp"] <= end)]
 
 df.dropna(inplace=True)
 
-# Sample
 random.seed(config["random_seed"])
 df = df.sample(n=config["n_samples"], random_state=config["random_seed"])
 
-print("SO FAR SO GOOD")
-
-# Load model class
 model_cfg = config["model"]
 model_module = importlib.import_module(model_cfg["module"])
 model_class = getattr(model_module, model_cfg["class_name"])
 model_kwargs = model_cfg.get("kwargs", {})
 
-# Instantiate and load model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model_class(**model_kwargs).to(device)
 model.load_state_dict(torch.load(config["model_path"], map_location=device))
@@ -47,7 +39,6 @@ mask_cfg = dict(config.get("mask_config", {}))
 
 print(mask_cfg)
 
-#create dataset for evaluations
 from src.utils.dataset import build_dataset, MaskedTimeSeriesDataset
 
 
@@ -87,7 +78,6 @@ for ts_keep_prob in config["ts_keep_probs"]:
     for index_keep_prob in config["index_keep_probs"]:
         print(f"Evaluating for ts_keep_prob {ts_keep_prob}, index_keep_prob {index_keep_prob}...")
 
-        # static_p remains constant
         dataset.set_mask_probabilities({
             'ts_keep_prob': ts_keep_prob,
             'index_keep_prob': index_keep_prob,
@@ -136,13 +126,11 @@ for ts_keep_prob in config["ts_keep_probs"]:
 
         results[(ts_keep_prob, index_keep_prob)] = compute_metrics(all_targets, all_preds, config["metrics"])
 
-# Save results
 os.makedirs(os.path.dirname(config["output_path"]), exist_ok=True)
 os.makedirs(config["output_plot_path"], exist_ok=True)
 with open(config["output_path"], "w") as f:
     yaml.dump(results, f)
 
-# Save clean JSON
 import json
 json_path = config["output_json_path"]
 cleaned = {
@@ -152,7 +140,6 @@ cleaned = {
 with open(json_path, "w") as f:
     json.dump(cleaned, f, indent=2)
 
-# Plot heatmaps
 import matplotlib.pyplot as plt
 import seaborn as sns
 

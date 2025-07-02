@@ -10,7 +10,7 @@ import src.utils.preprocessing as pre
 import os
 
 import yaml
-with open("config.yaml", "r") as f:
+with open("config/config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 index_name = config["data"]["index"]
