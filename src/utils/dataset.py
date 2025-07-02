@@ -173,5 +173,6 @@ class MaskedTimeSeriesDataset(Dataset):
             'X_static': xs_masked,
             'X_static_mask': xs_mask,
             'y': yt_filled,
-            'y_mask': y_mask
+            'y_mask': y_mask,
+            'X_index_raw': xi
         }
