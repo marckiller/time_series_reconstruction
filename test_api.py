@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def test_api_predict_incremental_masking(n_plots=60):
-    with open("config_experiment.yaml", "r") as f:
+    with open("config/config_experiment.yaml", "r") as f:
         config = yaml.safe_load(f)["plot_samples"]
 
     df = pd.read_parquet(config["input_path"])

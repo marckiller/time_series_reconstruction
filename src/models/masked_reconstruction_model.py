@@ -49,10 +49,10 @@ class MaskedReconstructionModel(nn.Module):
         x_ts_input = torch.cat([x_ts_masked, X_ts_mask], dim=1)  # (B, 2L)
         x_ts_out = self.ts_net(x_ts_input)  # (B, L)
 
-        # --- Sumowanie komponentów modelujących ---
+        # --- Summation of modeling components ---
         pred = x_cnn + x_static_out + x_ts_out
 
-        # --- Wklejenie znanych wartości ---
+        # --- Inserting known values ---
         pred = pred * (1 - X_ts_mask) + X_ts * X_ts_mask
 
         return pred

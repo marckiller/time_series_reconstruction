@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.training.train_model import train_model
 
 
-with open("config.yaml", "r") as f:
+with open("config/config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
 dataset_name = config["data"]["dataset_to_use"]
