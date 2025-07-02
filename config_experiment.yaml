@@ -23,19 +23,19 @@ compute_metrics:
       static_keep_prob: 1.0         # no masking X_static
 
 plot_samples:
-  input_path: data/synthetic/dataset.parquet
+  input_path: data/real/dataset.parquet
   n_samples: 6
   model_path: models/model.pt
   model:
     class_name: MaskedReconstructionModel
     module: src.models.masked_reconstruction_model
   date_range:
-    use_date_range: false
+    use_date_range: true
     start: '2020-01-01'
     end: '2024-12-31'
   mask_config:
     ts_keep_prob: 0.1       # strong masking X_ts
-    index_keep_prob: 0.5    # low masking X_index
+    index_keep_prob: 1.0    # low masking X_index
     static_keep_prob: 1.0   # no masking X_static
   plot_config:
     rows: 2

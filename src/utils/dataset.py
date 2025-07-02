@@ -8,7 +8,8 @@ def build_dataset(
     inputs: List[str],
     outputs: List[str],
     columns_map: Dict[str, List[str]],
-    expand_sequence_columns: bool = True
+    expand_sequence_columns: bool = True,
+    allow_nan: bool = True
 ) -> Tuple[torch.Tensor, ...]:
     """
     Builds model-ready tensors from a DataFrame.
@@ -36,7 +37,7 @@ def build_dataset(
 
             series = df[col]
 
-            if series.isnull().any():
+            if series.isnull().any() and not allow_nan:
                 raise ValueError(f"Column '{col}' contains NaN values.")
 
             if expand_sequence_columns:
@@ -174,5 +175,6 @@ class MaskedTimeSeriesDataset(Dataset):
             'X_static_mask': xs_mask,
             'y': yt_filled,
             'y_mask': y_mask,
-            'X_index_raw': xi
+            'X_index_raw': xi,
+            'X_ts_raw': xts
         }

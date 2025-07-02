@@ -19,7 +19,7 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3):
             xb_static  = sample['X_static'].unsqueeze(0).to(device)
             xb_static_m= sample['X_static_mask'].unsqueeze(0).to(device)
 
-            y_true     = sample['y'].cpu().numpy()
+            y_true     = sample['X_ts_raw'].cpu().numpy()
             y_pred     = model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
             y_pred     = y_pred.squeeze().cpu().numpy()
 
@@ -41,15 +41,10 @@ def plot_random_samples(model, dataset, device, n=6, rows=2, cols=3):
         ax.scatter(np.where(index_mask == 1)[0], index_data[index_mask == 1], color='gray', alpha=1.0, s=10, label='Index (visible)')
 
         ax.set_title(f"Sample {idx}")
+        if ax == axes.flat[0]:
+            ax.legend()
 
     plt.tight_layout()
-    handles, labels = [], []
-    for ax in axes.flat:
-        h, l = ax.get_legend_handles_labels()
-        handles.extend(h)
-        labels.extend(l)
-    by_label = dict(zip(labels, handles))
-    fig.legend(by_label.values(), by_label.keys(), loc='upper center', ncol=4, bbox_to_anchor=(0.5, 1.05))
     plt.show()
 
 
@@ -78,6 +73,7 @@ if __name__ == "__main__":
 
     df.dropna(inplace=True)
     df = df.sample(n=config["n_samples"], random_state=42)
+    print(len(df), "samples loaded from dataset")
 
     model_cfg = config["model"]
     model_module = importlib.import_module(model_cfg["module"])
