@@ -14,7 +14,7 @@ data:
   mask_config:
     ts_keep_prob: 0.2       #strong masking X_ts
     index_keep_prob: 0.5     #medium masking X_index
-    static_p: 0.3          # weak masking X_static
+    static_keep_prob: 0.3          # weak masking X_static
 
 model:
   name: "ConvReconstructionModel"

@@ -153,13 +153,15 @@ class MaskedTimeSeriesDataset(Dataset):
         ts_mask = xts_base_mask * ts_mask
         xts_masked = torch.nan_to_num(xts, nan=0.0) * ts_mask
 
-        keep_prob = self.mask_config.get('index_keep_prob', 0.5)
+        keep_prob = self.mask_config.get('index_keep_prob', 1.0)
         random_keep = (torch.rand_like(xi) < keep_prob).float()
         idx_mask = xi_base_mask * random_keep
         xi_masked = torch.nan_to_num(xi, nan=0.0) * idx_mask
 
-        p_static = self.mask_config.get('static_p', torch.empty(1).uniform_(0.1, 0.5).item())
-        xs_masked, xs_mask = self.random_mask(xs, xs_base_mask, p_static)
+        static_keep_prob = self.mask_config.get('static_keep_prob', 1.0)
+        random_keep = (torch.rand_like(xs) < static_keep_prob).float()
+        xs_mask = xs_base_mask * random_keep
+        xs_masked = torch.nan_to_num(xs, nan=0.0) * xs_mask
 
         yt_filled = torch.nan_to_num(yt, nan=0.0)
 
