@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Union
 
+from src.utils.masking import fill_missing_with_zero, observed_value_mask
+
 def build_dataset(
     df: pd.DataFrame,
     inputs: List[str],
@@ -115,11 +117,6 @@ class MaskedTimeSeriesDataset(Dataset):
     def __len__(self):
         return self.X_index.shape[0]
 
-    def interval_mask(self, length: int, every: int, start: int = 0) -> torch.Tensor:
-        mask = torch.zeros(length)
-        mask[start::every] = 1.0
-        return mask
-
     def random_mask(self, x: torch.Tensor, base_mask: torch.Tensor, p: float) -> Tuple[torch.Tensor, torch.Tensor]:
         random_keep = (torch.rand_like(x) > p).float()
         mask = base_mask * random_keep
@@ -143,26 +140,25 @@ class MaskedTimeSeriesDataset(Dataset):
 
         L = xi.shape[0]
 
-        xi_base_mask = (~torch.isnan(xi)).float()
-        xts_base_mask = (~torch.isnan(xts)).float()
-        xs_base_mask = (~torch.isnan(xs)).float()
-        y_mask       = (~torch.isnan(yt)).float()
+        xi_base_mask = observed_value_mask(xi)
+        xts_base_mask = observed_value_mask(xts)
+        xs_base_mask = observed_value_mask(xs)
+        y_mask       = observed_value_mask(yt)
 
         keep_prob = self.mask_config.get('ts_keep_prob', 0.2)
         ts_mask = (torch.rand_like(xts) < keep_prob).float()
-            
         ts_mask = xts_base_mask * ts_mask
-        xts_masked = torch.nan_to_num(xts, nan=0.0) * ts_mask
+        xts_masked = fill_missing_with_zero(xts, ts_mask)
 
         keep_prob = self.mask_config.get('index_keep_prob', 1.0)
         random_keep = (torch.rand_like(xi) < keep_prob).float()
         idx_mask = xi_base_mask * random_keep
-        xi_masked = torch.nan_to_num(xi, nan=0.0) * idx_mask
+        xi_masked = fill_missing_with_zero(xi, idx_mask)
 
         static_keep_prob = self.mask_config.get('static_keep_prob', 1.0)
         random_keep = (torch.rand_like(xs) < static_keep_prob).float()
         xs_mask = xs_base_mask * random_keep
-        xs_masked = torch.nan_to_num(xs, nan=0.0) * xs_mask
+        xs_masked = fill_missing_with_zero(xs, xs_mask)
 
         yt_filled = torch.nan_to_num(yt, nan=0.0)
 
