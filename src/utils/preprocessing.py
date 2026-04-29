@@ -176,6 +176,68 @@ def build_ts_dataframe(hour_df: pd.DataFrame, minute_df: pd.DataFrame) -> pd.Dat
 
     return pd.DataFrame(result)
 
+def project_observations_to_minute_grid(
+    observations: pd.DataFrame,
+    interval_start: pd.Timestamp | str,
+    value_column: str = "close",
+    timestamp_column: str = "timestamp",
+    seq_len: int = 60,
+    duplicate_policy: str = "last"
+) -> list[float]:
+    """
+    Project timestamped intrahour observations onto a fixed minute grid.
+
+    Missing slots are returned as NaN. Observations outside
+    [interval_start, interval_start + seq_len minutes) are ignored.
+
+    Parameters:
+        observations (pd.DataFrame): input observations with timestamp and value columns
+        interval_start (pd.Timestamp | str): start of the reconstructed interval
+        value_column (str): column containing observed values
+        timestamp_column (str): column containing timestamps
+        seq_len (int): number of minute slots in the output grid
+        duplicate_policy (str): how to handle multiple observations in one slot;
+            one of "first", "last", "mean"
+
+    Returns:
+        list[float]: length-seq_len sparse vector with observed values and NaN gaps
+    """
+    if seq_len <= 0:
+        raise ValueError("seq_len must be positive")
+    if duplicate_policy not in {"first", "last", "mean"}:
+        raise ValueError("duplicate_policy must be one of: first, last, mean")
+    if timestamp_column not in observations.columns:
+        raise KeyError(f"Column '{timestamp_column}' not found in observations.")
+    if value_column not in observations.columns:
+        raise KeyError(f"Column '{value_column}' not found in observations.")
+
+    start = pd.to_datetime(interval_start)
+    end = start + pd.Timedelta(minutes=seq_len)
+
+    df = observations[[timestamp_column, value_column]].copy()
+    df[timestamp_column] = pd.to_datetime(df[timestamp_column])
+    df = df[(df[timestamp_column] >= start) & (df[timestamp_column] < end)]
+
+    grid = [float("nan")] * seq_len
+    if df.empty:
+        return grid
+
+    offsets = ((df[timestamp_column] - start).dt.total_seconds() // 60).astype(int)
+    df = df.assign(_slot=offsets)
+
+    if duplicate_policy == "first":
+        values = df.groupby("_slot", sort=False)[value_column].first()
+    elif duplicate_policy == "last":
+        values = df.groupby("_slot", sort=False)[value_column].last()
+    else:
+        values = df.groupby("_slot", sort=False)[value_column].mean()
+
+    for slot, value in values.items():
+        if 0 <= slot < seq_len and pd.notna(value):
+            grid[int(slot)] = float(value)
+
+    return grid
+
 def compute_returns(
     df: pd.DataFrame,
     price_column: str = "close",
