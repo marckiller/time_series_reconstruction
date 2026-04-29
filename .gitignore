@@ -1,6 +1,7 @@
 data/real/
 data/synthetic/
 results/
+work/
 .DS_Store
 
 # Byte-compiled / optimized / DLL files

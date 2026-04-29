@@ -97,7 +97,8 @@ class MaskedTimeSeriesDataset(Dataset):
             'X_static': (D,), masked static features,
             'X_static_mask': (D,), corresponding binary mask,
             'y': (L3,), target sequence with NaNs replaced by zero,
-            'y_mask': (L3,), 1 where original y was not NaN
+            'y_mask': (L3,), 1 where original y was not NaN,
+            'loss_mask': (L3,), 1 where target is known and not visible in X_ts
         }
     """
     def __init__(
@@ -161,6 +162,7 @@ class MaskedTimeSeriesDataset(Dataset):
         xs_masked = fill_missing_with_zero(xs, xs_mask)
 
         yt_filled = torch.nan_to_num(yt, nan=0.0)
+        loss_mask = y_mask * (1 - ts_mask)
 
         return {
             'X_index': xi_masked,
@@ -171,6 +173,7 @@ class MaskedTimeSeriesDataset(Dataset):
             'X_static_mask': xs_mask,
             'y': yt_filled,
             'y_mask': y_mask,
+            'loss_mask': loss_mask,
             'X_index_raw': xi,
             'X_ts_raw': xts
         }
