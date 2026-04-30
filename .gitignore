@@ -1,5 +1,6 @@
 data/real/
 data/synthetic/
+data/canonical/
 results/
 work/
 .DS_Store
