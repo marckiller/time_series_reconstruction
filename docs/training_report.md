@@ -137,20 +137,29 @@ Where `beta` is the mean of `corr_30` and `corr_60`, clipped to `[-1, 1]`.
 
 Visible target observations are preserved exactly.
 
-## Current Real Benchmark
+## Current Benchmark
 
-Private real-data liquid-core test split:
+Final benchmark summary:
 
 ```text
-method           MSE       MAE       RMSE
-linear           0.0160    0.0901    0.1266
-index_residual   0.0135    0.0833    0.1160
-prior_correction 0.0119    0.0793    0.1092
+setting                  method             MSE       MAE       RMSE       points
+synthetic validation     prior_correction   0.0176    0.0948    0.1326    5,259,239
+synthetic validation     index_residual     0.0250    0.1080    0.1581    5,259,239
+synthetic validation     linear             0.0347    0.1307    0.1863    5,259,239
+
+real zero-shot           prior_correction   0.0132    0.0836    0.1151    1,519,629
+real zero-shot           index_residual     0.0135    0.0833    0.1161    1,519,629
+real zero-shot           linear             0.0160    0.0901    0.1265    1,519,629
+
+real finetuned test      prior_correction   0.0119    0.0793    0.1092    1,519,629
+real finetuned test      index_residual     0.0135    0.0833    0.1161    1,519,629
+real finetuned test      linear             0.0160    0.0901    0.1265    1,519,629
 ```
 
 Interpretation:
 
 - the neural residual model improves over linear interpolation and the index-residual prior,
+- synthetic pretraining transfers to real data, but real-data finetuning gives the best out-of-time result,
 - the improvement is measurable but conservative in plots,
 - future work can make the model more reactive to return-space index moves and local extremes.
 

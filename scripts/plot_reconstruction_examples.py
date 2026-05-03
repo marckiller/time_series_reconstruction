@@ -180,9 +180,11 @@ def collect_predictions(df: pd.DataFrame, args):
 
 def plot_rows(rows, output_path: Path, anonymous: bool):
     n = len(rows)
+    single_panel = n == 1
     cols = min(4, n)
     rows_count = int(np.ceil(n / cols))
-    fig, axes = plt.subplots(rows_count, cols, figsize=(cols * 4.0, rows_count * 3.0), squeeze=False)
+    figsize = (9.8, 5.4) if single_panel else (cols * 4.0, rows_count * 3.0)
+    fig, axes = plt.subplots(rows_count, cols, figsize=figsize, squeeze=False)
     x = np.arange(60)
 
     ticker_alias = {}
@@ -196,16 +198,16 @@ def plot_rows(rows, output_path: Path, anonymous: bool):
         observed = item["X_ts_mask"] == 1
         hidden_eval = item["loss_mask"] == 1
 
-        ax.plot(x, item["X_index"], "--", color="#6f6f6f", linewidth=1.0, label="index")
-        ax.plot(x, item["pred_index"], color="#7b4ab2", linewidth=1.1, alpha=0.9, label="index residual")
-        ax.plot(x, item["pred_model"], color="#f28e2b", linewidth=1.5, label="model")
-        ax.scatter(x[observed], item["X_ts"][observed], color="#d62728", s=14, zorder=4, label="visible target")
+        ax.plot(x, item["X_index"], "--", color="#6f6f6f", linewidth=1.1, label="index path")
+        ax.plot(x, item["pred_index"], color="#7b4ab2", linewidth=1.3, alpha=0.9, label="index-residual baseline")
+        ax.plot(x, item["pred_model"], color="#f28e2b", linewidth=1.9, label="prior-correction model")
+        ax.scatter(x[observed], item["X_ts"][observed], color="#d62728", s=22, zorder=4, label="visible target")
         ax.scatter(
             x[hidden_eval],
             item["y"][hidden_eval],
             facecolors="none",
             edgecolors="#111111",
-            s=20,
+            s=28,
             zorder=4,
             label="hidden target",
         )
@@ -214,21 +216,35 @@ def plot_rows(rows, output_path: Path, anonymous: bool):
 
         ticker = meta.get("target_ticker", "target")
         title_ticker = ticker_alias[ticker] if anonymous else ticker
-        title = f"{title_ticker} | obs={int(meta.get('target_observed_points', observed.sum()))}"
-        title += f" | c30={meta.get('corr_30', np.nan):.2f}"
-        ax.set_title(title, fontsize=8)
+        if single_panel:
+            title = (
+                f"Example 1 | "
+                f"visible target points={int(observed.sum())} | "
+                f"hidden evaluation points={int(hidden_eval.sum())} | "
+                f"30h return corr={meta.get('corr_30', np.nan):.2f}"
+            )
+        else:
+            title = f"{title_ticker} | visible={int(observed.sum())} | c30={meta.get('corr_30', np.nan):.2f}"
+        ax.set_title(title, fontsize=11 if single_panel else 8)
         ax.set_xlim(0, 59)
         ax.set_ylim(-0.12, 1.12)
         ax.tick_params(labelsize=7)
         ax.grid(alpha=0.16)
+        if single_panel:
+            ax.set_xlabel("Minute inside interval")
+            ax.set_ylabel("Normalized target price")
+            ax.legend(loc="upper left", fontsize=9, ncol=2)
 
     for ax in axes.ravel()[n:]:
         ax.axis("off")
 
-    handles, labels = axes.ravel()[0].get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    fig.legend(by_label.values(), by_label.keys(), loc="lower center", ncol=5, fontsize=9)
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
+    if single_panel:
+        fig.tight_layout()
+    else:
+        handles, labels = axes.ravel()[0].get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        fig.legend(by_label.values(), by_label.keys(), loc="lower center", ncol=5, fontsize=9)
+        fig.tight_layout(rect=(0, 0.05, 1, 1))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=170)
     plt.close(fig)

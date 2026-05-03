@@ -1,5 +1,8 @@
 pandas
+numpy
+matplotlib
 pyyaml
 torch
 fastapi
 uvicorn
+requests

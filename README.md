@@ -62,22 +62,52 @@ The index residual baseline is intentionally strong. It encodes the core market 
 
 ## Current Benchmark Snapshot
 
-Private real-data benchmark on liquid instruments, out-of-time test split:
+Final benchmark summary:
 
 ```text
-method           MSE       MAE       RMSE
-linear           0.0160    0.0901    0.1266
-index_residual   0.0135    0.0833    0.1160
-prior_correction 0.0119    0.0793    0.1092
+setting                  method             MSE       MAE       RMSE
+synthetic validation     prior_correction   0.0176    0.0948    0.1326
+synthetic validation     index_residual     0.0250    0.1080    0.1581
+synthetic validation     linear             0.0347    0.1307    0.1863
+
+real zero-shot           prior_correction   0.0132    0.0836    0.1151
+real zero-shot           index_residual     0.0135    0.0833    0.1161
+real zero-shot           linear             0.0160    0.0901    0.1265
+
+real finetuned test      prior_correction   0.0119    0.0793    0.1092
+real finetuned test      index_residual     0.0135    0.0833    0.1161
+real finetuned test      linear             0.0160    0.0901    0.1265
 ```
 
 Interpretation:
 
 - the neural model improves over simple linear interpolation and the index-residual baseline,
+- synthetic pretraining transfers to real data, but real-data finetuning provides the strongest result,
 - the current MVP is deliberately conservative: it learns bounded corrections to a strong deterministic baseline,
 - a future iteration can target more reactive return-space behavior and stronger local-extrema reconstruction.
 
 These results are based on private licensed market data and are not directly reproducible from this repository alone.
+
+## Example Reconstruction
+
+The figure below shows one anonymized out-of-time real-data test interval. The model receives only the red target points, hourly OHLC-derived anchors, the index trajectory, and correlation features. Open circles mark target prices that were hidden from the model and used only for evaluation.
+
+![Example reconstruction](docs/assets/example_reconstruction.png)
+
+The orange line is the final prior-correction model output. The purple line is the deterministic index-residual baseline, which is also exposed by the API as `method: "index_residual"`.
+
+For a dataset in the repository reconstruction format, the figure can be regenerated with:
+
+```bash
+python scripts/plot_reconstruction_examples.py \
+  --input-path data/real/liquid_core_splits/test.parquet \
+  --model-path models/prior_correction_model.pt \
+  --output-path docs/assets/example_reconstruction.png \
+  --max-tickers 1 \
+  --samples-per-ticker 1 \
+  --ts-keep-prob 0.3 \
+  --anonymous
+```
 
 ## Public Synthetic Pipeline
 
