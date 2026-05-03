@@ -69,11 +69,11 @@ Real data:
 - validation: 2020-01-01 to 2022-01-01,
 - test: intervals from 2022-01-01 onward.
 
-Final claims should use the out-of-time real test split.
+Final claims use the out-of-time real test split.
 
 ## Sparse Target Simulation
 
-During training and evaluation, known target points may be hidden from the model. Metrics are computed on known target points that were not visible as input.
+During training and evaluation, known target points can be hidden from the model. Metrics are computed on known target points that were not visible as input.
 
 This tests reconstruction quality under partial observability while avoiding evaluation on points already given to the model.
 
@@ -152,7 +152,7 @@ Interpretation:
 
 - the neural residual model improves over linear interpolation and the index-residual prior,
 - the improvement is measurable but conservative in plots,
-- future work should make the model more reactive to return-space index moves and local extremes.
+- future work can make the model more reactive to return-space index moves and local extremes.
 
 ## Model Direction
 

@@ -75,7 +75,7 @@ Interpretation:
 
 - the neural model improves over simple linear interpolation and the index-residual baseline,
 - the current MVP is deliberately conservative: it learns bounded corrections to a strong deterministic baseline,
-- a future iteration should target more reactive return-space behavior and stronger local-extrema reconstruction.
+- a future iteration can target more reactive return-space behavior and stronger local-extrema reconstruction.
 
 These results are based on private licensed market data and are not directly reproducible from this repository alone.
 
@@ -163,7 +163,7 @@ curl -X POST http://127.0.0.1:8000/reconstruct \
   --data @example.json
 ```
 
-See [docs/api.md](docs/api.md) for the intended endpoint contract.
+See [docs/api.md](docs/api.md) for the endpoint contract.
 
 ## Repository Hygiene
 
@@ -175,4 +175,4 @@ The following are intentionally excluded from git:
 - local experiment runs,
 - diagnostic scripts and plots under `work/`.
 
-The final public repository should contain the reproducible synthetic workflow, benchmark summaries, inference code, and trained model artifacts only.
+The public repository contains the reproducible synthetic workflow, benchmark summaries, inference code, and trained model artifacts only.

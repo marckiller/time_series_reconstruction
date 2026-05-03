@@ -1,7 +1,5 @@
 # API Contract
 
-This document describes the intended public inference API after the repository cleanup.
-
 ## Endpoint
 
 ```text
@@ -39,7 +37,7 @@ The endpoint reconstructs one completed 60-point target price path for a histori
 
 Actual `target_sparse` and `index_series` arrays must contain exactly 60 elements. Short arrays above are illustrative only.
 
-Missing target observations should be encoded as `null`.
+Missing target observations are encoded as `null`.
 
 ## Required Inputs
 
@@ -74,7 +72,7 @@ The model predicts in normalized space. Unless `return_normalized=true`, the res
 price = normalized * (high - low) + low
 ```
 
-Known target observations should be preserved exactly in the output.
+Known target observations are preserved exactly in the output.
 The index series is normalized internally with its own 60-point min/max range.
 
 ## Response
@@ -108,12 +106,12 @@ Available methods:
 
 ## Validation Rules
 
-The endpoint should reject requests when:
+The endpoint rejects requests when:
 
 - `high <= low`,
 - `index_series` is not length 60,
 - `target_sparse` is present but not length 60,
-- known target sparse values are outside a clearly invalid range,
+- known target sparse values are outside the target OHLC low/high range,
 - correlation values are missing or not finite.
 
-The endpoint may clip normalized outputs to `[0, 1]` before denormalization, but this behavior should be reported in `metadata.clipped`.
+When `clip=true`, the endpoint clips normalized outputs to `[0, 1]` before denormalization and reports this in `metadata.clipped`.
