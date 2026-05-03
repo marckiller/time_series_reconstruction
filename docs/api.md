@@ -9,6 +9,7 @@ POST /reconstruct
 ```
 
 The endpoint reconstructs one completed 60-point target price path for a historical one-hour interval.
+`POST /predict` is exposed as an alias.
 
 ## Request
 
@@ -55,11 +56,11 @@ Optional:
 
 - `target_sparse` with 60 values or nulls.
 
-If `target_sparse` is omitted, all target minute slots are treated as missing except the endpoint may still anchor the interval using target open and close.
+If `target_sparse` is omitted, all target minute slots are treated as missing. The backend always anchors slot 0 with target open and slot 59 with target close.
 
 ## Normalization
 
-The service normalizes target values using target hourly low/high:
+The public API accepts absolute price/index values. The service normalizes target values using target hourly low/high:
 
 ```text
 normalized = (price - low) / (high - low)
@@ -72,6 +73,7 @@ price = normalized * (high - low) + low
 ```
 
 Known target observations should be preserved exactly in the output.
+The index series is normalized internally with its own 60-point min/max range.
 
 ## Response
 
@@ -83,7 +85,7 @@ Known target observations should be preserved exactly in the output.
     101.44
   ],
   "normalized": false,
-  "method": "neural_model",
+  "method": "prior_correction_model",
   "metadata": {
     "known_points": 12,
     "clipped": false
@@ -91,17 +93,15 @@ Known target observations should be preserved exactly in the output.
 }
 ```
 
-The `reconstructed` array contains exactly 60 values in the final API.
+The `reconstructed` array contains exactly 60 values. By default these are
+returned in the same absolute price scale as `target_ohlc` and `target_sparse`.
 
 ## Methods
 
-The final API may expose multiple methods:
+The deployed MVP uses:
 
-- `linear`,
-- `index_residual`,
-- `neural_model`.
-
-The default should be chosen after final benchmarking. At the current stage, `index_residual` is the strongest deterministic method and the direct neural model is experimental.
+- `index_residual` as a transparent prior,
+- `PriorCorrectionModel` as a bounded neural correction over that prior.
 
 ## Validation Rules
 

@@ -30,6 +30,9 @@ STATIC_FEATURES = [
     "index_direction",
 ]
 
+TRAIN_COLUMNS = ["X_index", "X_ts", "y", *STATIC_FEATURES]
+PRIOR_COLUMNS = ["X_index", "X_ts", "X_prior", "y", *STATIC_FEATURES]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Experimental reconstruction training.")
@@ -38,8 +41,8 @@ def parse_args():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--run-name", default="run")
 
-    parser.add_argument("--model-module", default="src.models.masked_reconstruction_model")
-    parser.add_argument("--model-class", default="MaskedReconstructionModel")
+    parser.add_argument("--model-module", default="src.models.prior_correction_model")
+    parser.add_argument("--model-class", default="PriorCorrectionModel")
     parser.add_argument("--pretrained-path", default=None)
 
     parser.add_argument("--epochs", type=int, default=10)
@@ -50,6 +53,7 @@ def parse_args():
     parser.add_argument("--limit-val", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
 
     parser.add_argument("--ts-keep-prob", type=float, default=1.0)
     parser.add_argument("--index-keep-prob", type=float, default=1.0)
@@ -60,6 +64,7 @@ def parse_args():
     parser.add_argument("--cosine-diff-weight", type=float, default=0.0)
     parser.add_argument("--curvature-weight", type=float, default=0.0)
     parser.add_argument("--range-weight", type=float, default=0.0)
+    parser.add_argument("--volatility-weight", type=float, default=0.0)
     parser.add_argument("--pull-weight", type=float, default=0.05)
     parser.add_argument("--pull-window", type=int, default=2)
     parser.add_argument("--grad-clip", type=float, default=1.0)
@@ -68,7 +73,17 @@ def parse_args():
     return parser.parse_args()
 
 
-def select_device():
+def select_device(requested: str = "auto"):
+    if requested == "cpu":
+        return torch.device("cpu")
+    if requested == "mps":
+        if not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested but not available.")
+        return torch.device("mps")
+    if requested == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but not available.")
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
@@ -77,23 +92,40 @@ def select_device():
 
 
 def load_frame(path: str, limit: int | None, seed: int) -> pd.DataFrame:
+    t0 = time.time()
+    print(f"loading {path}", flush=True)
     df = pd.read_parquet(path)
+    required = PRIOR_COLUMNS if "X_prior" in df.columns else TRAIN_COLUMNS
+    df = df[required]
+    print(f"loaded {len(df)} rows from {path} in {time.time() - t0:.1f}s", flush=True)
     if limit is not None and len(df) > limit:
+        t0 = time.time()
+        print(f"sampling {limit} rows", flush=True)
         df = df.sample(n=limit, random_state=seed)
+        print(f"sampled {len(df)} rows in {time.time() - t0:.1f}s", flush=True)
     return df.reset_index(drop=True)
 
 
 def build_tensors(df: pd.DataFrame):
-    X_index, X_ts, y = build_dataset(
+    sequence_inputs = ["X_index", "X_ts"]
+    if "X_prior" in df.columns:
+        sequence_inputs.append("X_prior")
+    tensors = build_dataset(
         df,
-        ["X_index", "X_ts"],
+        sequence_inputs,
         ["y"],
         {
             "X_index": ["X_index"],
             "X_ts": ["X_ts"],
+            "X_prior": ["X_prior"],
             "y": ["y"],
         },
     )
+    if "X_prior" in df.columns:
+        X_index, X_ts, X_prior, y = tensors
+    else:
+        X_index, X_ts, y = tensors
+        X_prior = None
     (X_static,) = build_dataset(
         df,
         inputs=["X_static"],
@@ -101,22 +133,74 @@ def build_tensors(df: pd.DataFrame):
         columns_map={"X_static": STATIC_FEATURES},
         expand_sequence_columns=False,
     )
-    return X_index, X_ts, X_static, y
+    return X_index, X_ts, X_prior, X_static, y
+
+
+class PriorTimeSeriesDataset(torch.utils.data.Dataset):
+    def __init__(self, X_index, X_ts, X_prior, X_static, y):
+        self.X_index = X_index
+        self.X_ts = X_ts
+        self.X_prior = X_prior
+        self.X_static = X_static
+        self.y = y
+
+    def __len__(self):
+        return self.X_index.shape[0]
+
+    def __getitem__(self, idx):
+        xi = self.X_index[idx]
+        xts = self.X_ts[idx]
+        xp = self.X_prior[idx]
+        xs = self.X_static[idx]
+        yt = self.y[idx]
+
+        xi_mask = torch.isfinite(xi).float()
+        xts_mask = torch.isfinite(xts).float()
+        xp_mask = torch.isfinite(xp).float()
+        xs_mask = torch.isfinite(xs).float()
+        y_mask = torch.isfinite(yt).float()
+        loss_mask = y_mask * (1 - xts_mask)
+
+        return {
+            "X_index": torch.nan_to_num(xi, nan=0.0) * xi_mask,
+            "X_index_mask": xi_mask,
+            "X_ts": torch.nan_to_num(xts, nan=0.0) * xts_mask,
+            "X_ts_mask": xts_mask,
+            "X_prior": torch.nan_to_num(xp, nan=0.0) * xp_mask,
+            "X_prior_mask": xp_mask,
+            "X_static": torch.nan_to_num(xs, nan=0.0) * xs_mask,
+            "X_static_mask": xs_mask,
+            "y": torch.nan_to_num(yt, nan=0.0),
+            "y_mask": y_mask,
+            "loss_mask": loss_mask,
+        }
 
 
 def build_loader(df: pd.DataFrame, args, shuffle: bool):
-    X_index, X_ts, X_static, y = build_tensors(df)
-    dataset = MaskedTimeSeriesDataset(
-        X_index=X_index,
-        X_ts=X_ts,
-        X_static=X_static,
-        y=y,
-        mask_config={
-            "ts_keep_prob": args.ts_keep_prob,
-            "index_keep_prob": args.index_keep_prob,
-            "static_keep_prob": args.static_keep_prob,
-        },
-    )
+    t0 = time.time()
+    print(f"building tensors for {len(df)} rows", flush=True)
+    X_index, X_ts, X_prior, X_static, y = build_tensors(df)
+    print(f"built tensors in {time.time() - t0:.1f}s", flush=True)
+    if X_prior is not None:
+        dataset = PriorTimeSeriesDataset(
+            X_index=X_index,
+            X_ts=X_ts,
+            X_prior=X_prior,
+            X_static=X_static,
+            y=y,
+        )
+    else:
+        dataset = MaskedTimeSeriesDataset(
+            X_index=X_index,
+            X_ts=X_ts,
+            X_static=X_static,
+            y=y,
+            mask_config={
+                "ts_keep_prob": args.ts_keep_prob,
+                "index_keep_prob": args.index_keep_prob,
+                "static_keep_prob": args.static_keep_prob,
+            },
+        )
     return DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -189,6 +273,23 @@ def masked_range_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tens
     return torch.mean((pred_min - target_min) ** 2 + (pred_max - target_max) ** 2)
 
 
+def masked_volatility_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    diff_mask = mask[:, 1:] * mask[:, :-1]
+    valid_rows = diff_mask.sum(dim=1) >= 2
+    if valid_rows.sum().item() == 0:
+        return pred.new_tensor(0.0)
+
+    pred_diff = pred[:, 1:] - pred[:, :-1]
+    target_diff = target[:, 1:] - target[:, :-1]
+    losses = []
+    for i in torch.where(valid_rows)[0]:
+        row_mask = diff_mask[i].bool()
+        pred_vol = pred_diff[i][row_mask].std(unbiased=False)
+        target_vol = target_diff[i][row_mask].std(unbiased=False)
+        losses.append((pred_vol - target_vol) ** 2)
+    return torch.stack(losses).mean()
+
+
 def pull_loss(pred: torch.Tensor, target: torch.Tensor, target_mask: torch.Tensor, observed_mask: torch.Tensor, window: int) -> torch.Tensor:
     if observed_mask.sum().item() == 0:
         return pred.new_tensor(0.0)
@@ -207,28 +308,75 @@ def pull_loss(pred: torch.Tensor, target: torch.Tensor, target_mask: torch.Tenso
 
 
 def combined_loss(pred, target, loss_mask, y_mask, observed_mask, args):
+    zero = pred.new_tensor(0.0)
+
     mse = apply_masked_mse(pred, target, loss_mask)
     diff = masked_diff_loss(pred, target, loss_mask)
-    cosine_diff = masked_cosine_diff_loss(pred, target, loss_mask)
-    curvature = masked_curvature_loss(pred, target, loss_mask)
-    range_ = masked_range_loss(pred, target, loss_mask)
-    pull = pull_loss(pred, target, y_mask, observed_mask, args.pull_window)
-    total = (
-        args.mse_weight * mse
-        + args.diff_weight * diff
-        + args.cosine_diff_weight * cosine_diff
-        + args.curvature_weight * curvature
-        + args.range_weight * range_
-        + args.pull_weight * pull
+
+    cosine_diff = (
+        masked_cosine_diff_loss(pred, target, loss_mask)
+        if args.cosine_diff_weight > 0
+        else zero
     )
+    curvature = (
+        masked_curvature_loss(pred, target, loss_mask)
+        if args.curvature_weight > 0
+        else zero
+    )
+    range_ = masked_range_loss(pred, target, loss_mask) if args.range_weight > 0 else zero
+    volatility = (
+        masked_volatility_loss(pred, target, loss_mask)
+        if args.volatility_weight > 0
+        else zero
+    )
+    pull = (
+        pull_loss(pred, target, y_mask, observed_mask, args.pull_window)
+        if args.pull_weight > 0
+        else zero
+    )
+
+    total = args.mse_weight * mse + args.diff_weight * diff
+    if args.cosine_diff_weight > 0:
+        total = total + args.cosine_diff_weight * cosine_diff
+    if args.curvature_weight > 0:
+        total = total + args.curvature_weight * curvature
+    if args.range_weight > 0:
+        total = total + args.range_weight * range_
+    if args.volatility_weight > 0:
+        total = total + args.volatility_weight * volatility
+    if args.pull_weight > 0:
+        total = total + args.pull_weight * pull
+
     return total, {
         "mse": mse.detach(),
         "diff": diff.detach(),
         "cosine_diff": cosine_diff.detach(),
         "curvature": curvature.detach(),
         "range": range_.detach(),
+        "volatility": volatility.detach(),
         "pull": pull.detach(),
     }
+
+
+def model_forward(model, batch, device):
+    xb_idx = batch["X_index"].to(device)
+    xb_idx_m = batch["X_index_mask"].to(device)
+    xb_ts = batch["X_ts"].to(device)
+    xb_ts_m = batch["X_ts_mask"].to(device)
+    xb_static = batch["X_static"].to(device)
+    xb_static_m = batch["X_static_mask"].to(device)
+    if "X_prior" in batch:
+        return model(
+            xb_idx,
+            xb_idx_m,
+            xb_ts,
+            xb_ts_m,
+            batch["X_prior"].to(device),
+            batch["X_prior_mask"].to(device),
+            xb_static,
+            xb_static_m,
+        )
+    return model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
 
 
 def run_epoch(model, loader, optimizer, device, args, train: bool):
@@ -240,18 +388,14 @@ def run_epoch(model, loader, optimizer, device, args, train: bool):
         "cosine_diff": 0.0,
         "curvature": 0.0,
         "range": 0.0,
+        "volatility": 0.0,
         "pull": 0.0,
     }
     batches = 0
     points = 0.0
 
     for batch in loader:
-        xb_idx = batch["X_index"].to(device)
-        xb_idx_m = batch["X_index_mask"].to(device)
-        xb_ts = batch["X_ts"].to(device)
         xb_ts_m = batch["X_ts_mask"].to(device)
-        xb_static = batch["X_static"].to(device)
-        xb_static_m = batch["X_static_mask"].to(device)
         yb = batch["y"].to(device)
         yb_mask = batch["y_mask"].to(device)
         loss_mask = batch["loss_mask"].to(device)
@@ -260,7 +404,7 @@ def run_epoch(model, loader, optimizer, device, args, train: bool):
             continue
 
         with torch.set_grad_enabled(train):
-            pred = model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
+            pred = model_forward(model, batch, device)
             loss, parts = combined_loss(pred, yb, loss_mask, yb_mask, xb_ts_m, args)
 
             if train:
@@ -271,7 +415,7 @@ def run_epoch(model, loader, optimizer, device, args, train: bool):
                 optimizer.step()
 
         totals["loss"] += float(loss.detach().cpu())
-        for key in ["mse", "diff", "cosine_diff", "curvature", "range", "pull"]:
+        for key in ["mse", "diff", "cosine_diff", "curvature", "range", "volatility", "pull"]:
             totals[key] += float(parts[key].cpu())
         batches += 1
         points += float(loss_mask.sum().detach().cpu())
@@ -296,12 +440,15 @@ def main():
 
     train_df = load_frame(args.train_path, args.limit_train, args.seed)
     val_df = load_frame(args.val_path, args.limit_val, args.seed)
+    print("building train loader", flush=True)
     train_loader = build_loader(train_df, args, shuffle=True)
+    print("building val loader", flush=True)
     val_loader = build_loader(val_df, args, shuffle=False)
 
+    print("reading first batch", flush=True)
     sample = next(iter(train_loader))
     static_dim = sample["X_static"].shape[-1]
-    device = select_device()
+    device = select_device(args.device)
 
     model = load_model(args, static_dim=static_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -318,7 +465,7 @@ def main():
     print(
         f"loss: {args.mse_weight}*mse + {args.diff_weight}*diff + "
         f"{args.cosine_diff_weight}*cosine_diff + {args.curvature_weight}*curvature + "
-        f"{args.range_weight}*range + {args.pull_weight}*pull"
+        f"{args.range_weight}*range + {args.volatility_weight}*volatility + {args.pull_weight}*pull"
     )
 
     for epoch in range(1, args.epochs + 1):

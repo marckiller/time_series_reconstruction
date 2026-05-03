@@ -22,11 +22,12 @@ def parse_args():
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--run-name", default="eval")
-    parser.add_argument("--model-module", default="src.models.masked_reconstruction_model")
-    parser.add_argument("--model-class", default="MaskedReconstructionModel")
+    parser.add_argument("--model-module", default="src.models.prior_correction_model")
+    parser.add_argument("--model-class", default="PriorCorrectionModel")
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
     parser.add_argument("--ts-keep-prob", type=float, default=1.0)
     parser.add_argument("--index-keep-prob", type=float, default=1.0)
     parser.add_argument("--static-keep-prob", type=float, default=1.0)
@@ -35,7 +36,17 @@ def parse_args():
     return parser.parse_args()
 
 
-def select_device():
+def select_device(requested: str = "auto"):
+    if requested == "cpu":
+        return torch.device("cpu")
+    if requested == "mps":
+        if not torch.backends.mps.is_available():
+            raise RuntimeError("MPS requested but not available.")
+        return torch.device("mps")
+    if requested == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but not available.")
+        return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
@@ -51,16 +62,25 @@ def load_frame(path: str, limit: int | None, seed: int) -> pd.DataFrame:
 
 
 def build_tensors(df: pd.DataFrame):
-    X_index, X_ts, y = build_dataset(
+    sequence_inputs = ["X_index", "X_ts"]
+    if "X_prior" in df.columns:
+        sequence_inputs.append("X_prior")
+    tensors = build_dataset(
         df,
-        ["X_index", "X_ts"],
+        sequence_inputs,
         ["y"],
         {
             "X_index": ["X_index"],
             "X_ts": ["X_ts"],
+            "X_prior": ["X_prior"],
             "y": ["y"],
         },
     )
+    if "X_prior" in df.columns:
+        X_index, X_ts, X_prior, y = tensors
+    else:
+        X_index, X_ts, y = tensors
+        X_prior = None
     (X_static,) = build_dataset(
         df,
         inputs=["X_static"],
@@ -68,22 +88,71 @@ def build_tensors(df: pd.DataFrame):
         columns_map={"X_static": STATIC_FEATURES},
         expand_sequence_columns=False,
     )
-    return X_index, X_ts, X_static, y
+    return X_index, X_ts, X_prior, X_static, y
+
+
+class PriorTimeSeriesDataset(torch.utils.data.Dataset):
+    def __init__(self, X_index, X_ts, X_prior, X_static, y):
+        self.X_index = X_index
+        self.X_ts = X_ts
+        self.X_prior = X_prior
+        self.X_static = X_static
+        self.y = y
+
+    def __len__(self):
+        return self.X_index.shape[0]
+
+    def __getitem__(self, idx):
+        xi = self.X_index[idx]
+        xts = self.X_ts[idx]
+        xp = self.X_prior[idx]
+        xs = self.X_static[idx]
+        yt = self.y[idx]
+
+        xi_mask = torch.isfinite(xi).float()
+        xts_mask = torch.isfinite(xts).float()
+        xp_mask = torch.isfinite(xp).float()
+        xs_mask = torch.isfinite(xs).float()
+        y_mask = torch.isfinite(yt).float()
+        loss_mask = y_mask * (1 - xts_mask)
+
+        return {
+            "X_index": torch.nan_to_num(xi, nan=0.0) * xi_mask,
+            "X_index_mask": xi_mask,
+            "X_ts": torch.nan_to_num(xts, nan=0.0) * xts_mask,
+            "X_ts_mask": xts_mask,
+            "X_prior": torch.nan_to_num(xp, nan=0.0) * xp_mask,
+            "X_prior_mask": xp_mask,
+            "X_static": torch.nan_to_num(xs, nan=0.0) * xs_mask,
+            "X_static_mask": xs_mask,
+            "y": torch.nan_to_num(yt, nan=0.0),
+            "y_mask": y_mask,
+            "loss_mask": loss_mask,
+        }
 
 
 def build_loader(df: pd.DataFrame, args):
-    X_index, X_ts, X_static, y = build_tensors(df)
-    dataset = MaskedTimeSeriesDataset(
-        X_index=X_index,
-        X_ts=X_ts,
-        X_static=X_static,
-        y=y,
-        mask_config={
-            "ts_keep_prob": args.ts_keep_prob,
-            "index_keep_prob": args.index_keep_prob,
-            "static_keep_prob": args.static_keep_prob,
-        },
-    )
+    X_index, X_ts, X_prior, X_static, y = build_tensors(df)
+    if X_prior is not None:
+        dataset = PriorTimeSeriesDataset(
+            X_index=X_index,
+            X_ts=X_ts,
+            X_prior=X_prior,
+            X_static=X_static,
+            y=y,
+        )
+    else:
+        dataset = MaskedTimeSeriesDataset(
+            X_index=X_index,
+            X_ts=X_ts,
+            X_static=X_static,
+            y=y,
+            mask_config={
+                "ts_keep_prob": args.ts_keep_prob,
+                "index_keep_prob": args.index_keep_prob,
+                "static_keep_prob": args.static_keep_prob,
+            },
+        )
     return DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
 
@@ -99,12 +168,85 @@ def load_model(args, static_dim: int, device):
 
 
 def masked_metrics(pred, target, mask):
-    diff = (pred - target)[mask == 1]
-    if diff.numel() == 0:
-        return {"mse": np.nan, "mae": np.nan, "rmse": np.nan, "n_points": 0}
-    mse = torch.mean(diff**2).item()
-    mae = torch.mean(torch.abs(diff)).item()
-    return {"mse": mse, "mae": mae, "rmse": float(np.sqrt(mse)), "n_points": int(diff.numel())}
+    point_diff = (pred - target)[mask == 1]
+    if point_diff.numel() == 0:
+        return {
+            "mse": np.nan,
+            "mae": np.nan,
+            "rmse": np.nan,
+            "n_points": 0,
+            "diff_mse": np.nan,
+            "directional_accuracy": np.nan,
+            "diff_corr": np.nan,
+            "n_diffs": 0,
+            "range_error": np.nan,
+            "volatility_error": np.nan,
+            "n_ranges": 0,
+        }
+
+    mse = torch.mean(point_diff**2).item()
+    mae = torch.mean(torch.abs(point_diff)).item()
+
+    diff_mask = mask[:, 1:] * mask[:, :-1]
+    pred_diff = pred[:, 1:] - pred[:, :-1]
+    target_diff = target[:, 1:] - target[:, :-1]
+    valid_pred_diff = pred_diff[diff_mask == 1]
+    valid_target_diff = target_diff[diff_mask == 1]
+
+    if valid_pred_diff.numel() > 0:
+        diff_delta = valid_pred_diff - valid_target_diff
+        diff_mse = torch.mean(diff_delta**2).item()
+        directional_accuracy = (
+            torch.sign(valid_pred_diff) == torch.sign(valid_target_diff)
+        ).float().mean().item()
+        if valid_pred_diff.numel() >= 2:
+            pred_centered = valid_pred_diff - valid_pred_diff.mean()
+            target_centered = valid_target_diff - valid_target_diff.mean()
+            denom = torch.linalg.vector_norm(pred_centered) * torch.linalg.vector_norm(target_centered)
+            diff_corr = ((pred_centered * target_centered).sum() / denom).item() if denom.item() > 1e-8 else np.nan
+        else:
+            diff_corr = np.nan
+        n_diffs = int(valid_pred_diff.numel())
+    else:
+        diff_mse = np.nan
+        directional_accuracy = np.nan
+        diff_corr = np.nan
+        n_diffs = 0
+
+    range_errors = []
+    volatility_errors = []
+    for i in range(pred.shape[0]):
+        row_mask = mask[i].bool()
+        if row_mask.sum().item() < 2:
+            continue
+        pred_row = pred[i][row_mask]
+        target_row = target[i][row_mask]
+        pred_range = pred_row.max() - pred_row.min()
+        target_range = target_row.max() - target_row.min()
+        range_errors.append(torch.abs(pred_range - target_range))
+
+        row_diff_mask = diff_mask[i].bool()
+        if row_diff_mask.sum().item() >= 2:
+            pred_row_diff = pred_diff[i][row_diff_mask]
+            target_row_diff = target_diff[i][row_diff_mask]
+            volatility_errors.append(torch.abs(pred_row_diff.std(unbiased=False) - target_row_diff.std(unbiased=False)))
+
+    range_error = torch.stack(range_errors).mean().item() if range_errors else np.nan
+    volatility_error = torch.stack(volatility_errors).mean().item() if volatility_errors else np.nan
+
+    return {
+        "mse": mse,
+        "mae": mae,
+        "rmse": float(np.sqrt(mse)),
+        "n_points": int(point_diff.numel()),
+        "diff_mse": diff_mse,
+        "directional_accuracy": directional_accuracy,
+        "diff_corr": diff_corr,
+        "n_diffs": n_diffs,
+        "range_error": range_error,
+        "volatility_error": volatility_error,
+        "n_ranges": len(range_errors),
+    }
 
 
 def collect_group_key(df: pd.DataFrame, batch_start: int, batch_size: int):
@@ -132,12 +274,33 @@ def append_group_records(records, group_keys, preds, target, mask, prefix):
         records.append({"group": group, "method": prefix, **metrics})
 
 
+def model_forward(model, batch, device):
+    xb_idx = batch["X_index"].to(device)
+    xb_idx_m = batch["X_index_mask"].to(device)
+    xb_ts = batch["X_ts"].to(device)
+    xb_ts_m = batch["X_ts_mask"].to(device)
+    xb_static = batch["X_static"].to(device)
+    xb_static_m = batch["X_static_mask"].to(device)
+    if "X_prior" in batch:
+        return model(
+            xb_idx,
+            xb_idx_m,
+            xb_ts,
+            xb_ts_m,
+            batch["X_prior"].to(device),
+            batch["X_prior_mask"].to(device),
+            xb_static,
+            xb_static_m,
+        )
+    return model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
+
+
 def evaluate(args):
     torch.manual_seed(args.seed)
     df = load_frame(args.input_path, args.limit, args.seed)
     loader = build_loader(df, args)
     first = next(iter(loader))
-    device = select_device()
+    device = select_device(args.device)
     model = load_model(args, static_dim=first["X_static"].shape[-1], device=device)
 
     summary_rows = []
@@ -157,9 +320,12 @@ def evaluate(args):
             yb = batch["y"].to(device)
             loss_mask = batch["loss_mask"].to(device)
 
-            pred_model = model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
+            pred_model = model_forward(model, batch, device)
             pred_linear = linear_baseline(xb_ts, xb_ts_m, xb_static)
-            pred_index = index_residual_baseline(xb_ts, xb_ts_m, xb_idx, xb_static)
+            if "X_prior" in batch:
+                pred_index = batch["X_prior"].to(device)
+            else:
+                pred_index = index_residual_baseline(xb_ts, xb_ts_m, xb_idx, xb_static)
             if not args.no_clip:
                 pred_model = torch.clamp(pred_model, 0.0, 1.0)
                 pred_linear = torch.clamp(pred_linear, 0.0, 1.0)
@@ -200,31 +366,40 @@ def evaluate(args):
     return df, pd.DataFrame(summary_rows), pd.DataFrame(group_rows), plot_rows
 
 
+def weighted_average(g: pd.DataFrame, value_col: str, weight_col: str):
+    valid = g[value_col].notna() & (g[weight_col] > 0)
+    if not valid.any():
+        return np.nan
+    return np.average(g.loc[valid, value_col], weights=g.loc[valid, weight_col])
+
+
+def aggregate_metric_frame(g: pd.DataFrame) -> pd.Series:
+    mse = weighted_average(g, "mse", "n_points")
+    return pd.Series(
+        {
+            "mse": mse,
+            "mae": weighted_average(g, "mae", "n_points"),
+            "rmse": np.sqrt(mse) if pd.notna(mse) else np.nan,
+            "diff_mse": weighted_average(g, "diff_mse", "n_diffs"),
+            "directional_accuracy": weighted_average(g, "directional_accuracy", "n_diffs"),
+            "diff_corr": weighted_average(g, "diff_corr", "n_diffs"),
+            "range_error": weighted_average(g, "range_error", "n_ranges"),
+            "volatility_error": weighted_average(g, "volatility_error", "n_ranges"),
+            "n_points": int(g["n_points"].sum()),
+            "n_diffs": int(g["n_diffs"].sum()),
+            "n_ranges": int(g["n_ranges"].sum()),
+        }
+    )
+
+
 def aggregate_metrics(rows: pd.DataFrame) -> pd.DataFrame:
-    return rows.groupby("method").apply(
-        lambda g: pd.Series(
-            {
-                "mse": np.average(g["mse"], weights=g["n_points"]),
-                "mae": np.average(g["mae"], weights=g["n_points"]),
-                "rmse": np.sqrt(np.average(g["mse"], weights=g["n_points"])),
-                "n_points": int(g["n_points"].sum()),
-            }
-        )
-    ).reset_index()
+    return rows.groupby("method").apply(aggregate_metric_frame).reset_index()
 
 
 def aggregate_group_metrics(rows: pd.DataFrame) -> pd.DataFrame:
     rows = rows[rows["n_points"] > 0].copy()
     return rows.groupby(["group", "method"]).apply(
-        lambda g: pd.Series(
-            {
-                "mse": np.average(g["mse"], weights=g["n_points"]),
-                "mae": np.average(g["mae"], weights=g["n_points"]),
-                "rmse": np.sqrt(np.average(g["mse"], weights=g["n_points"])),
-                "n_points": int(g["n_points"].sum()),
-                "n_samples": int(len(g)),
-            }
-        )
+        lambda g: pd.concat([aggregate_metric_frame(g), pd.Series({"n_samples": int(len(g))})])
     ).reset_index()
 
 
