@@ -1,6 +1,9 @@
 import torch
 import numpy as np
 
+from src.baselines import index_residual_baseline
+
+
 class JSONPredictor:
     def __init__(self, model: torch.nn.Module, device=None):
         self.model = model
@@ -28,11 +31,22 @@ class JSONPredictor:
         X_ts = torch.nan_to_num(X_ts, nan=0.0)
         X_static = torch.nan_to_num(X_static, nan=0.0)
 
+        X_prior = index_residual_baseline(
+            X_ts.unsqueeze(0),
+            X_ts_mask.unsqueeze(0),
+            X_index.unsqueeze(0),
+            X_static.unsqueeze(0),
+        ).squeeze(0)
+        X_prior_mask = (~torch.isnan(X_prior)).float()
+        X_prior = torch.nan_to_num(X_prior, nan=0.0)
+
         return {
             'X_index': X_index,
             'X_index_mask': X_index_mask,
             'X_ts': X_ts,
             'X_ts_mask': X_ts_mask,
+            'X_prior': X_prior,
+            'X_prior_mask': X_prior_mask,
             'X_static': X_static,
             'X_static_mask': X_static_mask
         }
@@ -44,8 +58,19 @@ class JSONPredictor:
             xb_idx_m = example['X_index_mask'].unsqueeze(0).to(self.device)
             xb_ts = example['X_ts'].unsqueeze(0).to(self.device)
             xb_ts_m = example['X_ts_mask'].unsqueeze(0).to(self.device)
+            xb_prior = example['X_prior'].unsqueeze(0).to(self.device)
+            xb_prior_m = example['X_prior_mask'].unsqueeze(0).to(self.device)
             xb_static = example['X_static'].unsqueeze(0).to(self.device)
             xb_static_m = example['X_static_mask'].unsqueeze(0).to(self.device)
 
-            y_pred = self.model(xb_idx, xb_idx_m, xb_ts, xb_ts_m, xb_static, xb_static_m)
+            y_pred = self.model(
+                xb_idx,
+                xb_idx_m,
+                xb_ts,
+                xb_ts_m,
+                xb_prior,
+                xb_prior_m,
+                xb_static,
+                xb_static_m,
+            )
             return y_pred.squeeze(0).cpu().numpy()

@@ -1,122 +1,208 @@
 # time_series_reconstruction
 
-This project deals with stock market time series and focuses on reconstructing and completing company stock price trajectories based on index data using neural networks. The goal is to accurately fill in missing or noisy parts of a company’s price series by leveraging information from the broader market index, improving analysis and prediction in financial applications.
+Reconstruction of missing minute-level point prices from sparse stock observations and a market index trajectory.
 
-## Environment Setup
+The project targets offline historical data enhancement. For each completed one-hour interval, it reconstructs a 60-point target-stock price path using:
 
-You can set up the required environment in two ways:
+- hourly OHLC for the target instrument,
+- optional sparse minute-level target observations,
+- a dense minute-level index series for the same interval,
+- stock-index relationship features such as rolling correlations.
 
-### 1. Create and activate a virtual environment (recommended)
+The output is a completed minute-level point-price series. The project does not reconstruct full intrahour OHLC bars and does not forecast future prices.
 
-#### On macOS/Linux:
+## Project Status
+
+This repository contains a compact MVP for intrahour price-path reconstruction:
+
+- synthetic data generation,
+- reconstruction dataset building,
+- model training,
+- benchmark evaluation,
+- inference/API code.
+
+Real market data used for private benchmarks is not included. The public pipeline is reproducible with synthetic data, while real-data results are reported only as aggregate metrics and anonymized plots.
+
+## Reconstruction Contract
+
+Each sample uses a canonical 60-slot grid:
+
+```text
+slot 0  -> first minute of the interval
+slot 59 -> last minute of the interval
+```
+
+Main inputs:
+
+```text
+target_hour_ohlc      open, high, low, close for the target interval
+target_sparse_series  length-60 target series, NaN where unknown
+index_series          length-60 index series for the same interval
+corr_30, corr_60      rolling stock-index correlations
+```
+
+Internally, target values are normalized by the target interval range:
+
+```text
+normalized = (price - target_low) / (target_high - target_low)
+```
+
+Known target observations are preserved in the reconstructed output.
+
+See [docs/reconstruction_contract.md](docs/reconstruction_contract.md) for the full data and model contract.
+
+## Baselines
+
+The model is evaluated against two deterministic baselines:
+
+- `linear`: interpolates between target open, close, and any known target points.
+- `index_residual`: starts with the linear target baseline and adds local index deviations from its own linear path, scaled by rolling stock-index correlation.
+
+The index residual baseline is intentionally strong. It encodes the core market intuition behind the project: the index path can provide useful intrahour shape information, but target OHLC and known target observations remain hard constraints.
+
+## Current Benchmark Snapshot
+
+Final benchmark summary:
+
+```text
+setting                  method             MSE       MAE       RMSE
+synthetic validation     prior_correction   0.0176    0.0948    0.1326
+synthetic validation     index_residual     0.0250    0.1080    0.1581
+synthetic validation     linear             0.0347    0.1307    0.1863
+
+real zero-shot           prior_correction   0.0132    0.0836    0.1151
+real zero-shot           index_residual     0.0135    0.0833    0.1161
+real zero-shot           linear             0.0160    0.0901    0.1265
+
+real finetuned test      prior_correction   0.0119    0.0793    0.1092
+real finetuned test      index_residual     0.0135    0.0833    0.1161
+real finetuned test      linear             0.0160    0.0901    0.1265
+```
+
+Interpretation:
+
+- the neural model improves over simple linear interpolation and the index-residual baseline,
+- synthetic pretraining transfers to real data, but real-data finetuning provides the strongest result,
+- the current MVP is deliberately conservative: it learns bounded corrections to a strong deterministic baseline,
+- a future iteration can target more reactive return-space behavior and stronger local-extrema reconstruction.
+
+These results are based on private licensed market data and are not directly reproducible from this repository alone.
+
+## Example Reconstruction
+
+The figure below shows one anonymized out-of-time real-data test interval. The model receives only the red target points, hourly OHLC-derived anchors, the index trajectory, and correlation features. Open circles mark target prices that were hidden from the model and used only for evaluation.
+
+![Example reconstruction](docs/assets/example_reconstruction.png)
+
+The orange line is the final prior-correction model output. The purple line is the deterministic index-residual baseline, which is also exposed by the API as `method: "index_residual"`.
+
+For a dataset in the repository reconstruction format, the figure can be regenerated with:
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python scripts/plot_reconstruction_examples.py \
+  --input-path data/real/liquid_core_splits/test.parquet \
+  --model-path models/prior_correction_model.pt \
+  --output-path docs/assets/example_reconstruction.png \
+  --max-tickers 1 \
+  --samples-per-ticker 1 \
+  --ts-keep-prob 0.3 \
+  --anonymous
 ```
 
-#### On Windows (PowerShell):
+## Public Synthetic Pipeline
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-### 2. Alternatively, install required packages globally
+Generate synthetic canonical minute/hour OHLC:
 
 ```bash
-pip install -r requirements.txt
+python scripts/create_synthetic_canonical_ohlc.py \
+  --output-dir data/synthetic/canonical_v2 \
+  --n-hours 8000 \
+  --index-sigma 0.0006 \
+  --target-sigmas 0.0006 0.0007 0.0008 0.0009 0.0010 0.0011 0.0012 \
+  --correlations 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 \
+  --trajectory-regimes gbm stochastic_vol jumps mixed
 ```
 
-## Required packages example
+Build reconstruction samples:
 
-The main dependencies are:
-- pandas
-- pyyaml
-- torch
-- fastapi
-- uvicorn
+```bash
+python scripts/build_synthetic_reconstruction_dataset.py \
+  --canonical-dir data/synthetic/canonical_v2 \
+  --output-path data/synthetic/reconstruction_dataset_v2.parquet
+```
 
-All packages are listed in the `requirements.txt` file.
+Split the synthetic dataset:
 
----
+```bash
+python scripts/split_reconstruction_dataset.py \
+  --input-path data/synthetic/reconstruction_dataset_v2.parquet \
+  --output-dir data/synthetic/splits_v2 \
+  --mode random \
+  --train-frac 0.8
+```
 
-## Running the API
+## Training And Evaluation
 
-To start the FastAPI server locally, run:
+The current training pipeline uses a materialized index-residual prior. The model learns a bounded correction to that prior instead of reconstructing the whole path from scratch.
+
+Materialize the prior for a reconstruction dataset:
+
+```bash
+python scripts/materialize_prior_reconstruction_dataset.py \
+  --input-path data/synthetic/splits_v2/train.parquet \
+  --output-path data/synthetic/prior_splits/train.parquet \
+  --keep-prob 1.0
+
+python scripts/materialize_prior_reconstruction_dataset.py \
+  --input-path data/synthetic/splits_v2/val.parquet \
+  --output-path data/synthetic/prior_splits/val.parquet \
+  --keep-prob 1.0
+```
+
+Synthetic pretraining:
+
+```bash
+python scripts/train_reconstruction_model.py \
+  --train-path data/synthetic/prior_splits/train.parquet \
+  --val-path data/synthetic/prior_splits/val.parquet \
+  --output-dir work/model_runs \
+  --run-name prior_correction_synth \
+  --model-module src.models.prior_correction_model \
+  --model-class PriorCorrectionModel \
+  --epochs 12 \
+  --batch-size 1024 \
+  --diff-weight 0.6 \
+  --pull-weight 0.0 \
+  --early-stopping-patience 4 \
+  --early-stopping-min-delta 0.00005
+```
+
+Real-data finetuning uses private local data in the same reconstruction dataset format.
+
+See [docs/training_report.md](docs/training_report.md) for the current experiment setup and benchmark notes.
+
+## API
+
+The API exposes reconstruction as a service: provide absolute target OHLC, optional sparse absolute target observations, an absolute index series, and correlation features; receive a 60-point reconstructed target series. Normalization and denormalization happen inside the backend.
+The request can choose `method: "model"`, `method: "index_residual"`, or `method: "linear"`.
 
 ```bash
 uvicorn app:app --reload
+curl -X POST http://127.0.0.1:8000/reconstruct \
+  -H "Content-Type: application/json" \
+  --data @example.json
 ```
 
-- `app` is the Python module filename (app.py)
-- `app` is the FastAPI instance inside that file
-- `--reload` enables auto-reload on code changes (development only)
+See [docs/api.md](docs/api.md) for the endpoint contract.
 
-If port 8000 is busy, you can specify another port:
+## Repository Hygiene
 
-```bash
-uvicorn app:app --reload --port 8001
-```
+The following are intentionally excluded from git:
 
-## Example API Usage
+- private `.prn` market data,
+- generated real datasets,
+- generated synthetic datasets,
+- local experiment runs,
+- diagnostic scripts and plots under `work/`.
 
-To use the `predict` endpoint, send a POST request with a JSON body containing the input time series data. JSON contains:
-
-- `index_ts_low_high_norm`: array of 60 floats or nulls
-- `corr_30`: float or null
-- `corr_60`: float or null
-- `open_pos`: float or null
-- `close_pos`: float or null
-- `body_to_range`: float or null
-- `direction`: float or int or null
-- `index_open_pos`: float or null
-- `index_close_pos`: float or null
-- `index_body_to_range`: float or null
-- `index_direction`: float or int or null
-- `ts_low_high_norm`: array of 60 floats or nulls
-
-This request sends a time series array and optional parameters to the API, which returns the reconstructed or predicted time series data. A detailed example JSON payload is available in the `example.json` file.
-
-You can also test the API interactively in your browser using FastAPI's automatic documentation at the `/docs` endpoint.
-
-1. Run the API server locally, e.g.:
-```bash
-uvicorn app:app --reload --port 8000
-```
-2. Open your web browser and go to:
-```bash
-http://127.0.0.1:8000/docs
-```
-3. Find the `POST /predict` endpoint in the list and click on it to expand the details.
-
-4. Click the `Try it out` button.
-
-5. In the JSON input box that appears, paste your JSON payload (example available in `example.json` file)
-
-6. Click `Execute`.
-
-You will see the response from the API below, showing the prediction output.
-
-## Running Experiments
-
-The sample synthetic dataset located at `data/sample/dataset.parquet` was generated by running:
-
-```bash
-python scripts/create_synthetic_dataset.py
-```
-To run the evaluation and generate heatmaps for MSE, MAE, and R² depending on the completeness of time series, run the following command:
-
-```bash
-python experiments/evaluation/compute_metrics.py
-```
-
-Similarly, to generate plots that illustrate how the model works, run:
-
-```bash
-python experiments/plot/plot_samples.py
-```
-
-All configuration files are located in config/config_experiment.yaml.
+The public repository contains the reproducible synthetic workflow, benchmark summaries, inference code, and trained model artifacts only.
