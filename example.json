@@ -25,5 +25,6 @@
     "corr_30": 0.52,
     "corr_60": 0.47
   },
+  "method": "model",
   "return_normalized": false
 }

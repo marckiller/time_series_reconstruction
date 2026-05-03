@@ -32,6 +32,7 @@ The endpoint reconstructs one completed 60-point target price path for a histori
     "corr_30": 0.52,
     "corr_60": 0.47
   },
+  "method": "model",
   "return_normalized": false
 }
 ```
@@ -55,6 +56,7 @@ Required:
 Optional:
 
 - `target_sparse` with 60 values or nulls.
+- `method`, one of `model`, `index_residual`, or `linear`.
 
 If `target_sparse` is omitted, all target minute slots are treated as missing. The backend always anchors slot 0 with target open and slot 59 with target close.
 
@@ -98,10 +100,11 @@ returned in the same absolute price scale as `target_ohlc` and `target_sparse`.
 
 ## Methods
 
-The deployed MVP uses:
+Available methods:
 
-- `index_residual` as a transparent prior,
-- `PriorCorrectionModel` as a bounded neural correction over that prior.
+- `model`: `PriorCorrectionModel`, a bounded neural correction over the index-residual prior,
+- `index_residual`: transparent deterministic prior without neural correction,
+- `linear`: interpolation between target open, close, and known target observations.
 
 ## Validation Rules
 

@@ -9,6 +9,7 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from src.baselines import index_residual_baseline, linear_baseline
 from src.predictor import JSONPredictor
 
 
@@ -47,6 +48,7 @@ class ReconstructRequest(BaseModel):
     target_sparse: Optional[List[Optional[float]]] = None
     index_series: List[float]
     features: ReconstructionFeatures
+    method: str = "model"
     return_normalized: bool = False
     clip: bool = True
 
@@ -135,9 +137,42 @@ def build_model_input(request: ReconstructRequest) -> tuple[dict, float, float, 
     return {"X_index": x_index, "X_ts": x_ts, "X_static": x_static}, target.low, target.high, known_points
 
 
+def baseline_prediction(data_json: dict, method: str) -> np.ndarray:
+    x_index = torch.tensor(data_json["X_index"], dtype=torch.float32).unsqueeze(0)
+    x_ts_raw = torch.tensor(
+        [np.nan if value is None else value for value in data_json["X_ts"]],
+        dtype=torch.float32,
+    ).unsqueeze(0)
+    x_ts_mask = torch.isfinite(x_ts_raw).float()
+    x_ts = torch.nan_to_num(x_ts_raw, nan=0.0)
+    x_static = torch.tensor(data_json["X_static"], dtype=torch.float32).unsqueeze(0)
+
+    if method == "linear":
+        pred = linear_baseline(x_ts, x_ts_mask, x_static)
+    elif method == "index_residual":
+        pred = index_residual_baseline(x_ts, x_ts_mask, x_index, x_static)
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="method must be one of: model, index_residual, linear.",
+        )
+    return pred.squeeze(0).cpu().numpy()
+
+
 def reconstruct_payload(request: ReconstructRequest):
     data_json, target_low, target_high, known_points = build_model_input(request)
-    pred_norm = predictor.predict(data_json)
+    method = request.method
+    if method == "model":
+        pred_norm = predictor.predict(data_json)
+        response_method = "prior_correction_model"
+    elif method in {"index_residual", "linear"}:
+        pred_norm = baseline_prediction(data_json, method)
+        response_method = method
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="method must be one of: model, index_residual, linear.",
+        )
 
     clipped = False
     if request.clip:
@@ -153,7 +188,7 @@ def reconstruct_payload(request: ReconstructRequest):
     return {
         "reconstructed": reconstructed,
         "normalized": request.return_normalized,
-        "method": "prior_correction_model",
+        "method": response_method,
         "metadata": {
             "known_points": int(known_points),
             "clipped": clipped,

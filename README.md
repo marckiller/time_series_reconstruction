@@ -154,6 +154,7 @@ See [docs/training_report.md](docs/training_report.md) for the current experimen
 ## API
 
 The API exposes reconstruction as a service: provide absolute target OHLC, optional sparse absolute target observations, an absolute index series, and correlation features; receive a 60-point reconstructed target series. Normalization and denormalization happen inside the backend.
+The request can choose `method: "model"`, `method: "index_residual"`, or `method: "linear"`.
 
 ```bash
 uvicorn app:app --reload
